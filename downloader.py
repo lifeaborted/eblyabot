@@ -3,7 +3,7 @@ import os
 import logging
 from pathlib import Path
 
-# Папка для временных файлов
+# Папка для постоянного хранения файлов
 DOWNLOAD_DIR = 'downloads'
 Path(DOWNLOAD_DIR).mkdir(exist_ok=True)
 
@@ -21,17 +21,6 @@ class TikTokDownloader:
         }
 
     async def download_video(self, url: str) -> dict:
-        """
-        Скачивание видео из TikTok
-
-        Returns:
-            dict: {
-                'success': bool,
-                'file_path': str,
-                'title': str,
-                'error': str (если есть)
-            }
-        """
         try:
             with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
                 # Получаем информацию о видео
@@ -67,17 +56,8 @@ class TikTokDownloader:
             }
         except Exception as e:
             logger.error(f"Неожиданная ошибка: {e}")
-            return {
-                'success': False,
-                'error': f'Произошла ошибка: {str(e)}'
-            }
 
     @staticmethod
-    def cleanup_file(file_path: str):
-        """Удаление файла после отправки"""
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                logger.info(f"Файл {file_path} удален")
-        except Exception as e:
-            logger.error(f"Ошибка при удалении файла: {e}")
+    def file_exists(file_path: str) -> bool:
+        """Проверка существования файла"""
+        return os.path.exists(file_path) if file_path else False
