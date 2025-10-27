@@ -1,0 +1,38 @@
+# Секретные данные
+.env
+
+# База данных
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Скачанные файлы
+downloads/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+
+# Логи
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml

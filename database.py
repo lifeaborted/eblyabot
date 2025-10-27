@@ -1,7 +1,16 @@
 import aiosqlite
+<<<<<<< HEAD
 from datetime import datetime
 
 DATABASE_NAME = 'bot_data.db'
+=======
+import os
+from datetime import datetime
+
+DATABASE_DIR = os.getenv('DATABASE_DIR', 'var/task/data')
+os.makedirs(DATABASE_DIR, exist_ok=True)
+DATABASE_NAME = os.path.join(DATABASE_DIR, 'bot_data.db')
+>>>>>>> c4e063a (я докер поднял)
 
 async def init_db():
     """Инициализация базы данных"""
