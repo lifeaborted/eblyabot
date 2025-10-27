@@ -4,12 +4,8 @@ import logging
 from pathlib import Path
 
 # Папка для постоянного хранения файлов
-<<<<<<< HEAD
+
 DOWNLOAD_DIR = 'downloads'
-=======
-DOWNLOAD_DIR = os.getenv('DOWNLOAD_DIR', '/var/task/downloads')
->>>>>>> c4e063a (я докер поднял)
-Path(DOWNLOAD_DIR).mkdir(exist_ok=True)
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +56,3 @@ class TikTokDownloader:
             }
         except Exception as e:
             logger.error(f"Неожиданная ошибка: {e}")
-
-    @staticmethod
-    def file_exists(file_path: str) -> bool:
-        """Проверка существования файла"""
-<<<<<<< HEAD
-        return os.path.exists(file_path) if file_path else False
-=======
-        return os.path.exists(file_path) if file_path else False
->>>>>>> c4e063a (я докер поднял)
