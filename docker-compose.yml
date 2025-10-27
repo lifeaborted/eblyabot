@@ -1,0 +1,20 @@
+services:
+  tiktok-bot:
+    build: .
+    container_name: tiktok-bot
+    restart: unless-stopped
+    volumes:
+      - ./data:/var/task/data
+      - ./downloads:/var/task/downloads
+    env_file:
+      - .env
+    environment:
+      - TZ=Europe/Moscow
+      - PYTHONUNBUFFERED=1
+      - DATABASE_DIR=/var/task/data
+      - DOWNLOAD_DIR=/var/task/downloads
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
