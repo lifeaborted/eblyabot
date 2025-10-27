@@ -9,11 +9,6 @@ from dotenv import load_dotenv
 import database
 from downloader import TikTokDownloader
 
-<<<<<<< HEAD
-# Загрузка переменных окружения сися
-=======
-# Загрузка переменных окружения
->>>>>>> c4e063a (я докер поднял)
 load_dotenv()
 
 # Настройка логирования
@@ -324,8 +319,4 @@ def main():
 
 
 if __name__ == '__main__':
-<<<<<<< HEAD
     main()
-=======
-    main()
->>>>>>> c4e063a (я докер поднял)
