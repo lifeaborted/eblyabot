@@ -10,6 +10,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS videos (
                 video_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 url TEXT NOT NULL,
+                file_path TEXT,
                 file_id TEXT,
                 title TEXT,
                 user_id INTEGER NOT NULL,
@@ -27,9 +28,9 @@ async def add_video(url: str, user_id: int, username: str = None,
     async with aiosqlite.connect(DATABASE_NAME) as db:
         cursor = await db.execute(
             '''INSERT INTO videos 
-               (url, user_id, username, file_id, title) 
-               VALUES (?, ?, ?, ?, ?)''',
-            (url, user_id, username, file_id, title)
+               (url, user_id, username, file_path, file_id, title) 
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (url, user_id, username, file_path, file_id, title)
         )
         await db.commit()
         return cursor.lastrowid

@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Папка для постоянного хранения файлов
 
-DOWNLOAD_DIR = 'downloads'
+DOWNLOAD_DIR = 'downloads_main'
 
 logger = logging.getLogger(__name__)
 
