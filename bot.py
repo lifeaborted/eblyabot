@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import database
 from downloader import TikTokDownloader
 
-# Загрузка переменных окружения
+# Загрузка переменных окружения сися
 load_dotenv()
 
 # Настройка логирования
