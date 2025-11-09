@@ -94,3 +94,14 @@ async def check_url_exists(url: str):
         ) as cursor:
             result = await cursor.fetchone()
             return result is not None
+
+
+async def get_all_videos():
+    """Получение всех видео пользователя"""
+    async with aiosqlite.connect(DATABASE_NAME) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            'SELECT * FROM videos ORDER BY created_at DESC'
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
