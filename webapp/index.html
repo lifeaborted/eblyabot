@@ -3,161 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TikTok Downloader</title>
+    <title>silent tears downloader</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        h1 {
-            font-size: 24px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .input-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid var(--tg-theme-hint-color, #ccc);
-            border-radius: 8px;
-            font-size: 16px;
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
-        }
-
-        button {
-            width: 100%;
-            padding: 14px;
-            background-color: var(--tg-theme-button-color, #3390ec);
-            color: var(--tg-theme-button-text-color, #ffffff);
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        button:hover:not(:disabled) {
-            opacity: 0.9;
-        }
-
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            display: none;
-        }
-
-        .status.loading {
-            display: block;
-            background-color: var(--tg-theme-hint-color, #f0f0f0);
-        }
-
-        .status.success {
-            display: block;
-            background-color: #4CAF50;
-            color: white;
-        }
-
-        .status.error {
-            display: block;
-            background-color: #f44336;
-            color: white;
-        }
-
-        .video-info {
-            margin-top: 20px;
-            padding: 15px;
-            background-color: var(--tg-theme-secondary-bg-color, #f7f7f7);
-            border-radius: 8px;
-            display: none;
-        }
-
-        .video-info h3 {
-            margin-bottom: 10px;
-            font-size: 18px;
-        }
-
-        .video-info p {
-            color: var(--tg-theme-hint-color, #999);
-            margin: 5px 0;
-        }
-
-        .spinner {
-            border: 3px solid var(--tg-theme-hint-color, #f3f3f3);
-            border-top: 3px solid var(--tg-theme-button-color, #3390ec);
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-            display: none;
-        }
-
-        .spinner.active {
-            display: block;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
+    <link rel="stylesheet" href="static/css/style.css">
 </head>
 <body>
     <div class="container">
-        <h1>🎵 TikTok Downloader</h1>
+        <div class="card">
+            <div class="card-image-container">
+                <img src="static/gavno.png" alt="gavno" class="card-image">
+            </div>
+            <div class="header">
+                <h1><span id="titleText">silent tears downloader</span><span id="dots"></span></h1>
+            </div>
 
-        <div class="input-group">
-            <label for="url">Ссылка на TikTok видео:</label>
-            <input
-                type="text"
-                id="url"
-                placeholder="https://www.tiktok.com/@user/video/..."
-            >
+            <div class="input-group">
+                <label class="label" for="url">paste your lonely url here:</label>
+                <input
+                    type="text"
+                    id="url"
+                    class="input-field"
+                    placeholder="https://www.tiktok.com/@repent_of_your_sin/..."
+                >
+            </div>
+
+            <button id="downloadBtn" class="btn">download tears</button>
+
+            <div class="spinner" id="spinner"></div>
+
+            <div class="status" id="status"></div>
+
+            <div class="video-info" id="videoInfo">
+                <h3 id="videoTitle"></h3>
+                <p id="videoAuthor"></p>
+            </div>
         </div>
 
-        <button id="downloadBtn">Скачать видео</button>
+        <div class="instructions">
+            <h3>how to download your sorrows:</h3>
 
-        <div class="spinner" id="spinner"></div>
+            <h3>✞ paste your url in the void above</h3>
+            <h3>✞ click "download tears"</h3>
+            <h3>✞ wait in solitude</h3>
+            <h3>✞ send to your empty chat</h3>
+        </div>
 
-        <div class="status" id="status"></div>
-
-        <div class="video-info" id="videoInfo">
-            <h3 id="videoTitle"></h3>
-            <p id="videoAuthor"></p>
+        <div class="footer">
+            <p>made with no hope | in memory of forgotten downloads</p>
+            <p class="silence-glow">the silence continues...</p>
         </div>
     </div>
 
@@ -165,7 +58,7 @@
     const tg = window.Telegram.WebApp;
     tg.expand();
 
-    document.body.style.backgroundColor = tg.themeParams.bg_color || '#ffffff';
+    document.body.style.backgroundColor = tg.themeParams.bg_color || '#0a0a0a';
 
     const urlInput = document.getElementById('url');
     const downloadBtn = document.getElementById('downloadBtn');
@@ -178,22 +71,9 @@
     let currentVideo = null;
     let currentUserData = null;
 
-    // Логирование в UI для дебага
-    function debugLog(message, data = null) {
-        console.log(message, data || '');
-        // Можно добавить визуальный лог на странице
-        const logDiv = document.getElementById('debug-log');
-        if (logDiv) {
-            const entry = document.createElement('div');
-            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
-            if (data) entry.textContent += ` ${JSON.stringify(data)}`;
-            logDiv.appendChild(entry);
-        }
-    }
-
     function getUserData() {
         let userId = 0;
-        let username = 'unknown';
+        let username = 'lonely_soul';
         let chatId = null;
 
         const urlParams = new URLSearchParams(window.location.search);
@@ -202,7 +82,7 @@
 
         if (urlUserId) {
             userId = parseInt(urlUserId);
-            username = urlUsername || 'unknown';
+            username = urlUsername || 'lonely_soul';
         }
 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
@@ -219,16 +99,14 @@
 
     async function sendVideo() {
         if (!currentVideo) {
-            showStatus('Нет видео для отправки', 'error');
+            showStatus('no video to send... just like no one to talk to', 'error');
             return;
         }
 
-        showStatus('Отправляю видео...', 'loading');
+        showStatus('sending video into the void...', 'loading');
         tg.MainButton.showProgress();
 
         try {
-            // ВСЕГДА используем API метод (работает для обеих кнопок)
-
             const requestBody = {
                 user_id: currentUserData.user_id,
                 chat_id: currentUserData.chat_id || currentUserData.user_id,
@@ -246,22 +124,21 @@
                 body: JSON.stringify(requestBody)
             });
 
-
             const data = await response.json();
 
             if (data.success) {
-                showStatus('✅ Видео отправлено!', 'success');
+                showStatus('video sent... but will anyone watch?', 'success');
                 setTimeout(() => {
                     tg.close();
-                }, 1000);
+                }, 2000);
             } else {
-                showStatus(`Ошибка: ${data.error}`, 'error');
+                showStatus(`error: ${data.error}... just like everything else`, 'error');
                 tg.MainButton.hideProgress();
             }
 
         } catch (error) {
             console.error('Error sending video:', error);
-            showStatus('Ошибка при отправке', 'error');
+            showStatus('connection failed... just like everything else', 'error');
             tg.MainButton.hideProgress();
         }
     }
@@ -272,18 +149,18 @@
         const url = urlInput.value.trim();
 
         if (!url) {
-            showStatus('Введите ссылку на TikTok видео', 'error');
+            showStatus('no url provided... just like no purpose', 'error');
             return;
         }
 
         if (!url.includes('tiktok.com')) {
-            showStatus('Неверная ссылка на TikTok', 'error');
+            showStatus('not a tiktok link... just like nothing makes sense anymore', 'error');
             return;
         }
 
         downloadBtn.disabled = true;
         spinner.classList.add('active');
-        showStatus('Скачиваю видео...', 'loading');
+        showStatus('downloading... another moment of false hope', 'loading');
         videoInfo.style.display = 'none';
         tg.MainButton.hide();
 
@@ -314,22 +191,22 @@
                 };
 
                 videoTitle.textContent = data.title;
-                videoAuthor.textContent = `Автор: ${data.uploader || 'Неизвестно'}`;
+                videoAuthor.textContent = `uploader: ${data.uploader || 'unknown entity'}`;
                 videoInfo.style.display = 'block';
 
-                showStatus('✅ Видео готово!', 'success');
+                showStatus('download complete... temporary relief', 'success');
 
-                tg.MainButton.setText('Отправить в чат');
+                tg.MainButton.setText('send into void');
                 tg.MainButton.show();
                 tg.MainButton.enable();
 
             } else {
-                showStatus(`Ошибка: ${data.error}`, 'error');
+                showStatus(`error: ${data.error}... expected nothing less`, 'error');
             }
 
         } catch (error) {
             console.error('Error:', error);
-            showStatus('Произошла ошибка при скачивании', 'error');
+            showStatus('failed again... why am I surprised?', 'error');
         } finally {
             downloadBtn.disabled = false;
             spinner.classList.remove('active');
@@ -341,17 +218,68 @@
         status.className = `status ${type}`;
     }
 
-    urlInput.focus();
-</script>
-<div id="debug-log" style="
+    // Add subtle sound of rain (console log only)
+    window.addEventListener('load', () => {
+        console.log('~rain drops on the window~');
+        console.log('another day, another download...');
+        urlInput.focus();
+    });
+
+    // Add a sad typing effect to the title
+    const titleElement = document.querySelector('#titleText');
+    const dotsElement = document.querySelector('#dots');
+    const originalText = titleElement.textContent;
+    let i = 0;
+    titleElement.textContent = '';
+
+    function typeWriter() {
+        if (i < originalText.length) {
+            titleElement.textContent += originalText.charAt(i);
+            i++;
+            setTimeout(typeWriter, 150);
+        }
+    }
+
+    setTimeout(typeWriter, 1000);
+
+    // Cycling dots animation: 1 dot, 2 dots, 3 dots, then disappear
+    function animateDots() {
+        let dotCount = 0;
+        // Start with empty dots (0 dots) initially
+        dotsElement.textContent = '';
+        
+        const dotInterval = setInterval(() => {
+            switch(dotCount) {
+                case 0:
+                    dotsElement.textContent = '.';
+                    break;
+                case 1:
+                    dotsElement.textContent = '..';
+                    break;
+                case 2:
+                    dotsElement.textContent = '...';
+                    break;
+                case 3:
+                    dotsElement.textContent = '';
+                    break;
+            }
+            dotCount = (dotCount + 1) % 4;
+        }, 500); // Change every 500ms
+    }
+
+    // Start the dot animation after the typing effect
+    setTimeout(animateDots, 1000 + (originalText.length * 150));
+    </script>
+
+    <div id="debug-log" style="
         position: fixed;
         bottom: 0;
         left: 0;
         right: 0;
         max-height: 200px;
         overflow-y: auto;
-        background: rgba(0,0,0,0.8);
-        color: #0f0;
+        background: rgba(0,0,0,0.9);
+        color: #555;
         font-family: monospace;
         font-size: 10px;
         padding: 10px;
@@ -359,11 +287,9 @@
     "></div>
 
     <script>
-        // Показывать лог только если есть query параметр ?debug=1
         if (new URLSearchParams(window.location.search).get('debug') === '1') {
             document.getElementById('debug-log').style.display = 'block';
         }
     </script>
-</body>
 </body>
 </html>

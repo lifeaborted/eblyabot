@@ -1,3 +1,5 @@
+import logging
+
 import aiosqlite
 from datetime import datetime
 
@@ -75,6 +77,7 @@ async def update_video_file_id(url: str, file_id: str):
             'UPDATE videos SET file_id = ?, created_at = ? WHERE url = ?',
             (file_id, datetime.now().replace(microsecond=0), url)
         )
+        logging.info("\nобнова в бд\n")
         await db.commit()
 
 async def get_total_videos():

@@ -5,7 +5,8 @@ from aiohttp import web
 from telegram import Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, \
     InlineKeyboardMarkup, InlineQueryResultVideo, InlineQueryResultCachedVideo, InputTextMessageContent, \
     InlineQueryResultArticle, MenuButtonWebApp, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, InlineQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, InlineQueryHandler, ChosenInlineResultHandler
+
 from dotenv import load_dotenv
 import uuid
 from telegram.request import HTTPXRequest
@@ -123,10 +124,15 @@ async def api_download(request):
 async def start_web_server():
     """Запуск веб-сервера"""
     app = web.Application()
+
+    # Serve static files
+    app.add_routes([web.static('/static', 'webapp/static')])
+
+    # Add other routes
     app.router.add_get('/', serve_webapp)
     app.router.add_get('/videos/{filename}', serve_video)
     app.router.add_post('/api/download', api_download)
-    app.router.add_post('/api/send', api_send)  # ← Добавьте это
+    app.router.add_post('/api/send', api_send)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -296,84 +302,6 @@ async def handle_existing_video(update: Update, user, url: str, video_data: dict
         await handle_new_video(update, user, url)
 
 
-async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик данных из Web App"""
-    try:
-        raw_data = update.effective_message.web_app_data.data
-        logging.info(f"=== Web App Data Received ===")
-        logging.info(f"Raw data: {raw_data}")
-        logging.info(f"User: {update.effective_user.id}")
-        logging.info(f"Chat: {update.effective_chat.id}")
-        logging.info(f"Chat type: {update.effective_chat.type}")
-
-        data = json.loads(raw_data)
-        logging.info(f"Parsed data: {data}")
-
-        user = update.effective_user
-
-        if data.get('action') == 'send_video':
-            url = data.get('url')
-            file_id = data.get('file_id')
-            video_url = data.get('video_url')
-            title = data.get('title', 'TikTok Video')
-
-            sent_message = None
-
-            # Пробуем отправить через file_id
-            if file_id:
-                try:
-                    logging.info(f"Attempting to send via file_id: {file_id}")
-                    sent_message = await update.message.reply_video(
-                        video=file_id,
-                        caption=f"🎵 {title}",
-                        supports_streaming=True,
-                        read_timeout=60,
-                        write_timeout=60
-                    )
-                    logging.info("Successfully sent via file_id")
-                except Exception as e:
-                    logging.error(f"Failed to send via file_id: {e}")
-                    file_id = None
-
-            # Если file_id не сработал, пробуем через URL
-            if not sent_message and video_url:
-                try:
-                    logging.info(f"Attempting to send via video_url: {video_url}")
-                    sent_message = await update.message.reply_video(
-                        video=video_url,
-                        caption=f"🎵 {title}",
-                        supports_streaming=True,
-                        read_timeout=60,
-                        write_timeout=60
-                    )
-                    logging.info("Successfully sent via video_url")
-                except Exception as e:
-                    logging.error(f"Failed to send via video_url: {e}")
-
-            # Сохраняем file_id в БД
-            if sent_message and sent_message.video and url:
-                new_file_id = sent_message.video.file_id
-                await database.update_video_file_id(url, new_file_id)
-                logging.info(f"File_id saved to database: {new_file_id}")
-            else:
-                logging.warning("Could not send video or save file_id")
-                # Отправляем сообщение об ошибке пользователю
-                if not sent_message:
-                    await update.message.reply_text(
-                        "❌ Не удалось отправить видео. Попробуйте еще раз или отправьте ссылку боту напрямую."
-                    )
-
-        logging.info("=== End Web App Data Processing ===")
-
-    except json.JSONDecodeError as e:
-        logging.error(f"JSON decode error: {e}")
-        logging.error(f"Raw data was: {raw_data}")
-        await update.message.reply_text("❌ Ошибка обработки данных")
-    except Exception as e:
-        logging.error(f"Error handling web app data: {e}", exc_info=True)
-        await update.message.reply_text("❌ Произошла ошибка при отправке видео")
-
-
 # ============ BOT HANDLERS ============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -480,17 +408,18 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query:
         all_videos = await database.get_all_videos()
 
-        for video in all_videos:  # Последние 10
+        for video in all_videos:
             if video.get('file_id'):
+                # Кодируем URL в ID, чтобы можно было восстановить при выборе
+                result_id = f"cached_{video['video_id']}_{uuid.uuid4()}"  # или просто использовать video['url']
                 results.append(
                     InlineQueryResultCachedVideo(
-                        id=str(uuid.uuid4()),
+                        id=result_id,  # используем специальный ID
                         video_file_id=video['file_id'],
-                        title=f"🎵 {video.get('title', 'TikTok Video')}",
-                        description=f"📅 {video['created_at']} by {video['username']}"
+                        title=f"{video.get('title', 'TikTok Video')}",
+                        description=f"{video['created_at']} by {video['username']}"
                     )
                 )
-
     # Если введена ссылка
     elif 'tiktok.com' in query.lower():
         existing_video = await database.get_video_by_url(query)
@@ -504,22 +433,50 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     description="♻️ Из кэша"
                 )
             )
+            #await database.update_video_file_id(existing_video['url'], existing_video['file_id'])
         else:
             results.append(
                 InlineQueryResultArticle(
                     id=str(uuid.uuid4()),
                     title="⏳ Видео не скачано",
-                    description="Сначала скачай в личке с ботом",
+                    description="Скачать...",
                     input_message_content=InputTextMessageContent(
-                        message_text=f"📥 Для скачивания этого видео:\n"
-                                     f"1. Открой @{context.bot.username}\n"
-                                     f"2. Отправь ссылку: {query}\n"
-                                     f"3. После скачивания используй меня снова"
+                        message_text=query
                     )
                 )
             )
 
     await update.inline_query.answer(results, cache_time=5, is_personal=True)
+
+
+async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    result_id = update.chosen_inline_result.result_id
+    query = update.chosen_inline_result.query
+    user = update.chosen_inline_result.from_user
+
+    # Если был запрос с URL, обрабатываем как раньше
+    if 'tiktok.com' in query.lower():
+        existing_video = await database.get_video_by_url(query)
+        if existing_video and existing_video.get('file_id'):
+            await database.update_video_file_id(existing_video['url'], existing_video['file_id'])
+            logging.info(
+                f"Выбрано кэшированное видео (по URL) из инлайн запроса для URL: {query}, пользователь: {user.id}")
+    # Если был пустой запрос и пользователь выбрал одно из видео
+    elif result_id.startswith('cached_'):
+        # Извлекаем video_id из result_id
+        try:
+            # Формат: cached_{video_id}_{uuid}
+            parts = result_id.split('_')
+            if len(parts) >= 2:
+                video_id = int(parts[1])
+                # Получаем видео по ID из базы
+                video = await database.get_video_by_id(video_id)
+                if video and video.get('file_id'):
+                    await database.update_video_file_id(video['url'], video['file_id'])
+                    logging.info(
+                        f"Выбрано кэшированное видео (по ID) из инлайн запроса для URL: {video['url']}, пользователь: {user.id}")
+        except (ValueError, IndexError):
+            logging.error(f"Невозможно извлечь video_id из result_id: {result_id}")
 
 
 async def api_send(request):
@@ -631,6 +588,7 @@ def main():
     application.add_handler(CommandHandler("raupov", raupov))
     application.add_handler(CommandHandler("help", help))
     application.add_handler(InlineQueryHandler(inline_query))
+    application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
     application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
