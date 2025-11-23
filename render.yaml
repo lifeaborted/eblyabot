@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: tiktok-bot
+    env: docker
+    region: frankfurt  # or oregon, virginia based on your preference
+    plan: free  # or starter if you need more resources
+    branch: main
+    healthCheckPath: /
+    healthCheckHttpSuccessCodes:
+      - 200
+    envVars:
+      - key: BOT_TOKEN
+        sync: false  # Set this in Render dashboard
+      - key: SERVER_URL
+        sync: false  # Will be auto-set by Render to your service URL
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: DATABASE_DIR
+        value: /app/data
+      - key: DOWNLOAD_DIR
+        value: /app/downloads
+      - key: TZ
+        value: Europe/Moscow
+      - key: DB_TYPE
+        value: sqlite  # Change to 'postgresql' if using PostgreSQL
+      # Uncomment the following when using PostgreSQL:
+      # - key: DATABASE_URL
+      #   sync: false  # Set this in Render dashboard when using PostgreSQL

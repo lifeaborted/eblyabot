@@ -1,110 +1,246 @@
 import logging
-
-import aiosqlite
+import os
 from datetime import datetime
+from typing import Optional, List, Dict, Any
 
-DATABASE_NAME = 'bot_data.db'
+# Determine database type based on environment
+DB_TYPE = os.getenv('DB_TYPE', 'sqlite').lower()  # Can be 'sqlite' or 'postgresql'
 
-async def init_db():
-    """Инициализация базы данных"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
+if DB_TYPE == 'postgresql':
+    import asyncpg
+    HAS_ASPG = True
+else:
+    import aiosqlite
+    HAS_ASPG = False
+
+DATABASE_NAME = os.getenv('DATABASE_NAME', 'bot_data.db')
+DATABASE_URL = os.getenv('DATABASE_URL')  # For PostgreSQL
+
+
+class DatabaseManager:
+    def __init__(self):
+        self.db_type = DB_TYPE
+        self.pool = None
+        
+    async def init_db(self):
+        """Initialize database connection and create tables"""
+        if self.db_type == 'postgresql' and DATABASE_URL:
+            # Initialize PostgreSQL
+            self.pool = await asyncpg.create_pool(DATABASE_URL)
+            async with self.pool.acquire() as conn:
+                await self._create_postgres_tables(conn)
+        else:
+            # Initialize SQLite
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                await self._create_sqlite_tables(db)
+    
+    async def _create_sqlite_tables(self, db):
+        """Create tables for SQLite database"""
         await db.execute('''
             CREATE TABLE IF NOT EXISTS videos (
                 video_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
                 file_path TEXT,
                 file_id TEXT,
                 title TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(url)
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         await db.commit()
+        
+    async def _create_postgres_tables(self, conn):
+        """Create tables for PostgreSQL database"""
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS videos (
+                video_id SERIAL PRIMARY KEY,
+                url TEXT NOT NULL UNIQUE,
+                file_path TEXT,
+                file_id TEXT,
+                title TEXT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+    
+    async def add_video(self, url: str, user_id: int, username: str = None,
+                       file_path: str = None, file_id: str = None,
+                       title: str = None):
+        """Добавление нового видео в базу данных"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval(
+                    '''INSERT INTO videos
+                       (url, user_id, username, file_path, file_id, title)
+                       VALUES ($1, $2, $3, $4, $5, $6) 
+                       RETURNING video_id''',
+                    url, user_id, username, file_path, file_id, title
+                )
+                return result
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                cursor = await db.execute(
+                    '''INSERT INTO videos
+                       (url, user_id, username, file_path, file_id, title)
+                       VALUES (?, ?, ?, ?, ?, ?)''',
+                    (url, user_id, username, file_path, file_id, title)
+                )
+                await db.commit()
+                return cursor.lastrowid
+
+    async def get_user_videos(self, user_id: int) -> List[Dict[str, Any]]:
+        """Получение всех видео пользователя"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    'SELECT * FROM videos WHERE user_id = $1 ORDER BY created_at DESC',
+                    user_id
+                )
+                return [dict(row) for row in rows]
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    'SELECT * FROM videos WHERE user_id = ? ORDER BY created_at DESC',
+                    (user_id,)
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+
+    async def get_video_by_id(self, video_id: int) -> Optional[Dict[str, Any]]:
+        """Получение видео по ID"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    'SELECT * FROM videos WHERE video_id = $1',
+                    video_id
+                )
+                return dict(row) if row else None
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    'SELECT * FROM videos WHERE video_id = ?',
+                    (video_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    return dict(row) if row else None
+
+    async def get_video_by_url(self, url: str) -> Optional[Dict[str, Any]]:
+        """Получение видео по URL"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    'SELECT * FROM videos WHERE url = $1',
+                    url
+                )
+                return dict(row) if row else None
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    'SELECT * FROM videos WHERE url = ?',
+                    (url,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    return dict(row) if row else None
+
+    async def update_video_file_id(self, url: str, file_id: str):
+        """Обновление file_id для видео (для переиспользования в Telegram)"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    'UPDATE videos SET file_id = $1, created_at = $2 WHERE url = $3',
+                    file_id, datetime.now().replace(microsecond=0), url
+                )
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                await db.execute(
+                    'UPDATE videos SET file_id = ?, created_at = ? WHERE url = ?',
+                    (file_id, datetime.now().replace(microsecond=0), url)
+                )
+                await db.commit()
+        
+        logging.info("\nобнова в бд\n")
+
+    async def get_total_videos(self) -> int:
+        """Получение общего количества видео"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval('SELECT COUNT(*) FROM videos')
+                return result
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                async with db.execute('SELECT COUNT(*) FROM videos') as cursor:
+                    result = await cursor.fetchone()
+                    return result[0]
+
+    async def check_url_exists(self, url: str) -> bool:
+        """Проверка существования URL в базе"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval(
+                    'SELECT video_id FROM videos WHERE url = $1',
+                    url
+                )
+                return result is not None
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                async with db.execute(
+                    'SELECT video_id FROM videos WHERE url = ?',
+                    (url,)
+                ) as cursor:
+                    result = await cursor.fetchone()
+                    return result is not None
+
+    async def get_all_videos(self) -> List[Dict[str, Any]]:
+        """Получение всех видео"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    'SELECT * FROM videos ORDER BY created_at DESC'
+                )
+                return [dict(row) for row in rows]
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    'SELECT * FROM videos ORDER BY created_at DESC'
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    return [dict(row) for row in rows]
+
+# Create a global instance
+db_manager = DatabaseManager()
+
+# Maintain the same function interface for backward compatibility
+async def init_db():
+    return await db_manager.init_db()
 
 async def add_video(url: str, user_id: int, username: str = None,
                    file_path: str = None, file_id: str = None,
                    title: str = None):
-    """Добавление нового видео в базу данных"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        cursor = await db.execute(
-            '''INSERT INTO videos 
-               (url, user_id, username, file_path, file_id, title) 
-               VALUES (?, ?, ?, ?, ?, ?)''',
-            (url, user_id, username, file_path, file_id, title)
-        )
-        await db.commit()
-        return cursor.lastrowid
+    return await db_manager.add_video(url, user_id, username, file_path, file_id, title)
 
 async def get_user_videos(user_id: int):
-    """Получение всех видео пользователя"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            'SELECT * FROM videos WHERE user_id = ? ORDER BY created_at DESC',
-            (user_id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+    return await db_manager.get_user_videos(user_id)
 
 async def get_video_by_id(video_id: int):
-    """Получение видео по ID"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            'SELECT * FROM videos WHERE video_id = ?',
-            (video_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+    return await db_manager.get_video_by_id(video_id)
 
 async def get_video_by_url(url: str):
-    """Получение видео по URL"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            'SELECT * FROM videos WHERE url = ?',
-            (url,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return dict(row) if row else None
+    return await db_manager.get_video_by_url(url)
 
 async def update_video_file_id(url: str, file_id: str):
-    """Обновление file_id для видео (для переиспользования в Telegram)"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        await db.execute(
-            'UPDATE videos SET file_id = ?, created_at = ? WHERE url = ?',
-            (file_id, datetime.now().replace(microsecond=0), url)
-        )
-        logging.info("\nобнова в бд\n")
-        await db.commit()
+    return await db_manager.update_video_file_id(url, file_id)
 
 async def get_total_videos():
-    """Получение общего количества видео"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        async with db.execute('SELECT COUNT(*) FROM videos') as cursor:
-            result = await cursor.fetchone()
-            return result[0]
-
+    return await db_manager.get_total_videos()
 
 async def check_url_exists(url: str):
-    """Проверка существования URL в базе"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        async with db.execute(
-            'SELECT video_id FROM videos WHERE url = ?',
-            (url,)
-        ) as cursor:
-            result = await cursor.fetchone()
-            return result is not None
-
+    return await db_manager.check_url_exists(url)
 
 async def get_all_videos():
-    """Получение всех видео пользователя"""
-    async with aiosqlite.connect(DATABASE_NAME) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            'SELECT * FROM videos ORDER BY created_at DESC'
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
+    return await db_manager.get_all_videos()

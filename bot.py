@@ -136,9 +136,12 @@ async def start_web_server():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    
+    # Use PORT from environment or default to 8080
+    port = int(os.environ.get('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info("Веб-сервер запущен на порту 8080")
+    logging.info(f"Веб-сервер запущен на порту {port}")
 
 
 async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):

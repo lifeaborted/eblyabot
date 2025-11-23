@@ -1,30 +1,36 @@
-FROM public.ecr.aws/lambda/python:3.11
+# Use a standard Python 3.11 base image (not AWS Lambda specific)
+FROM python:3.11-slim
 
-# Установка ffmpeg из статической сборки
-RUN yum update -y && \
-    yum install -y wget tar xz && \
-    wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
-    tar xvf ffmpeg-release-amd64-static.tar.xz && \
-    mv ffmpeg-*-amd64-static/ffmpeg /usr/local/bin/ && \
-    mv ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ && \
-    rm -rf ffmpeg-* && \
-    yum remove -y wget tar xz && \
-    yum clean all && \
-    rm -rf /var/cache/yum
+# Install system dependencies including ffmpeg
+RUN apt-get update && \
+    apt-get install -y wget tar xz-utils curl ffmpeg && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
-# Копирование requirements.txt и установка зависимостей
-COPY requirements.txt ${LAMBDA_TASK_ROOT}/
-RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
+# Set working directory
+WORKDIR /app
 
-# Копирование всех файлов проекта
-COPY bot.py database.py downloader.py ${LAMBDA_TASK_ROOT}/
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Создание директорий для данных
-RUN mkdir -p ${LAMBDA_TASK_ROOT}/downloads ${LAMBDA_TASK_ROOT}/data
+# Copy the rest of the application
+COPY . .
 
-# Установка рабочей директории
-WORKDIR ${LAMBDA_TASK_ROOT}
+# Create necessary directories
+RUN mkdir -p downloads downloads_main data
 
-# Переопределяем ENTRYPOINT и CMD для обычного приложения
-ENTRYPOINT []
+# Expose port 8080 (Render's default)
+EXPOSE 8080
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/ || exit 1
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV DATABASE_DIR=/app/data
+ENV DOWNLOAD_DIR=/app/downloads
+
+# Run the application
 CMD ["python", "-u", "bot.py"]
