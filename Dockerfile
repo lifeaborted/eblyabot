@@ -20,6 +20,9 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p downloads downloads_main data
 
+# Set proper permissions
+RUN chmod -R 755 /app/downloads /app/downloads_main /app/data
+
 # Expose port 8080 (Render's default)
 EXPOSE 8080
 
