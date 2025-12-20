@@ -25,6 +25,6 @@ RUN mkdir -p ${LAMBDA_TASK_ROOT}/downloads ${LAMBDA_TASK_ROOT}/data
 # Установка рабочей директории
 WORKDIR ${LAMBDA_TASK_ROOT}
 
-# Переопределяем ENTRYPOINT и CMD для обычного приложения
+# Переопределяем ENTRYPOINT и CMD для обычного ботика
 ENTRYPOINT []
 CMD ["python", "-u", "bot.py"]
