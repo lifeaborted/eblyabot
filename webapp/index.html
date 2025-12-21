@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>silent tears downloader</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="card-image-container">
+                <img src="static/gavno.png" alt="gavno" class="card-image">
+            </div>
+            <div class="header">
+                <h1><span id="titleText">silent tears downloader</span><span id="dots"></span></h1>
+            </div>
+
+            <div class="input-group">
+                <label class="label" for="url">paste your lonely url here:</label>
+                <input
+                    type="text"
+                    id="url"
+                    class="input-field"
+                    placeholder="https://www.tiktok.com/@repent_of_your_sin/..."
+                >
+            </div>
+
+            <button id="downloadBtn" class="btn">download tears</button>
+
+            <div class="spinner" id="spinner"></div>
+
+            <div class="status" id="status"></div>
+
+            <div class="video-info" id="videoInfo">
+                <h3 id="videoTitle"></h3>
+                <p id="videoAuthor"></p>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <h3>how to download your sorrows:</h3>
+
+            <h3>✞ paste your url in the void above</h3>
+            <h3>✞ click "download tears"</h3>
+            <h3>✞ wait in solitude</h3>
+            <h3>✞ send to your empty chat</h3>
+        </div>
+
+        <div class="footer">
+            <p>made with no hope | in memory of forgotten downloads</p>
+            <p class="silence-glow">the silence continues...</p>
+        </div>
+    </div>
+
+    <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+
+    document.body.style.backgroundColor = tg.themeParams.bg_color || '#0a0a0a';
+
+    const urlInput = document.getElementById('url');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const status = document.getElementById('status');
+    const spinner = document.getElementById('spinner');
+    const videoInfo = document.getElementById('videoInfo');
+    const videoTitle = document.getElementById('videoTitle');
+    const videoAuthor = document.getElementById('videoAuthor');
+
+    let currentVideo = null;
+    let currentUserData = null;
+
+    function getUserData() {
+        let userId = 0;
+        let username = 'lonely_soul';
+        let chatId = null;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlUserId = urlParams.get('user_id');
+        const urlUsername = urlParams.get('username');
+
+        if (urlUserId) {
+            userId = parseInt(urlUserId);
+            username = urlUsername || 'lonely_soul';
+        }
+
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            userId = tg.initDataUnsafe.user.id || userId;
+            username = tg.initDataUnsafe.user.username || username;
+        }
+
+        if (tg.initDataUnsafe && tg.initDataUnsafe.chat) {
+            chatId = tg.initDataUnsafe.chat.id;
+        }
+
+        return { user_id: userId, username: username, chat_id: chatId };
+    }
+
+    async function sendVideo() {
+        if (!currentVideo) {
+            showStatus('no video to send... just like no one to talk to', 'error');
+            return;
+        }
+
+        showStatus('sending video into the void...', 'loading');
+        tg.MainButton.showProgress();
+
+        try {
+            const requestBody = {
+                user_id: currentUserData.user_id,
+                chat_id: currentUserData.chat_id || currentUserData.user_id,
+                url: currentVideo.url,
+                video_url: currentVideo.video_url,
+                file_id: currentVideo.file_id,
+                title: currentVideo.title
+            };
+
+            const response = await fetch(`/api/send`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showStatus('video sent... but will anyone watch?', 'success');
+                setTimeout(() => {
+                    tg.close();
+                }, 2000);
+            } else {
+                showStatus(`error: ${data.error}... just like everything else`, 'error');
+                tg.MainButton.hideProgress();
+            }
+
+        } catch (error) {
+            console.error('Error sending video:', error);
+            showStatus('connection failed... just like everything else', 'error');
+            tg.MainButton.hideProgress();
+        }
+    }
+
+    tg.MainButton.onClick(sendVideo);
+
+    downloadBtn.addEventListener('click', async () => {
+        const url = urlInput.value.trim();
+
+        if (!url) {
+            showStatus('no url provided... just like no purpose', 'error');
+            return;
+        }
+
+        if (!url.includes('tiktok.com')) {
+            showStatus('not a tiktok link... just like nothing makes sense anymore', 'error');
+            return;
+        }
+
+        downloadBtn.disabled = true;
+        spinner.classList.add('active');
+        showStatus('downloading... another moment of false hope', 'loading');
+        videoInfo.style.display = 'none';
+        tg.MainButton.hide();
+
+        try {
+            currentUserData = getUserData();
+
+            const response = await fetch(`/api/download`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    url: url,
+                    user_id: currentUserData.user_id,
+                    username: currentUserData.username
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                currentVideo = {
+                    url: url,
+                    video_url: data.video_url,
+                    file_id: data.file_id,
+                    title: data.title,
+                    uploader: data.uploader
+                };
+
+                videoTitle.textContent = data.title;
+                videoAuthor.textContent = `uploader: ${data.uploader || 'unknown entity'}`;
+                videoInfo.style.display = 'block';
+
+                showStatus('download complete... temporary relief', 'success');
+
+                tg.MainButton.setText('send into void');
+                tg.MainButton.show();
+                tg.MainButton.enable();
+
+            } else {
+                showStatus(`error: ${data.error}... expected nothing less`, 'error');
+            }
+
+        } catch (error) {
+            console.error('Error:', error);
+            showStatus('failed again... why am I surprised?', 'error');
+        } finally {
+            downloadBtn.disabled = false;
+            spinner.classList.remove('active');
+        }
+    });
+
+    function showStatus(message, type) {
+        status.textContent = message;
+        status.className = `status ${type}`;
+    }
+
+    // Add subtle sound of rain (console log only)
+    window.addEventListener('load', () => {
+        console.log('~rain drops on the window~');
+        console.log('another day, another download...');
+        urlInput.focus();
+    });
+
+    // Add a sad typing effect to the title
+    const titleElement = document.querySelector('#titleText');
+    const dotsElement = document.querySelector('#dots');
+    const originalText = titleElement.textContent;
+    let i = 0;
+    titleElement.textContent = '';
+
+    function typeWriter() {
+        if (i < originalText.length) {
+            titleElement.textContent += originalText.charAt(i);
+            i++;
+            setTimeout(typeWriter, 150);
+        }
+    }
+
+    setTimeout(typeWriter, 1000);
+
+    // Cycling dots animation: 1 dot, 2 dots, 3 dots, then disappear
+    function animateDots() {
+        let dotCount = 0;
+        // Start with empty dots (0 dots) initially
+        dotsElement.textContent = '';
+        
+        const dotInterval = setInterval(() => {
+            switch(dotCount) {
+                case 0:
+                    dotsElement.textContent = '.';
+                    break;
+                case 1:
+                    dotsElement.textContent = '..';
+                    break;
+                case 2:
+                    dotsElement.textContent = '...';
+                    break;
+                case 3:
+                    dotsElement.textContent = '';
+                    break;
+            }
+            dotCount = (dotCount + 1) % 4;
+        }, 500); // Change every 500ms
+    }
+
+    // Start the dot animation after the typing effect
+    setTimeout(animateDots, 1000 + (originalText.length * 150));
+    </script>
+
+    <div id="debug-log" style="
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 200px;
+        overflow-y: auto;
+        background: rgba(0,0,0,0.9);
+        color: #555;
+        font-family: monospace;
+        font-size: 10px;
+        padding: 10px;
+        display: none;
+    "></div>
+
+    <script>
+        if (new URLSearchParams(window.location.search).get('debug') === '1') {
+            document.getElementById('debug-log').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
