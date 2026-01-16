@@ -55,13 +55,11 @@ async def api_download(request):
     """API для скачивания видео"""
     try:
         data = await request.json()
-        logging.info(data)
-        url = data.get('url')
-        user_id = data.get('user_id')
-        username = data.get('username')
+        logging.info(f"API Download request: {data}")
 
-        if not user_id:
-            user_id = 000
+        url = data.get('url')
+        user_id = data.get('user_id', 0)
+        username = data.get('username', 'unknown')
 
         if not url or 'tiktok.com' not in url.lower():
             return web.json_response({
@@ -73,15 +71,19 @@ async def api_download(request):
         existing_video = await database.get_video_by_url(url)
 
         if existing_video and existing_video.get('file_id'):
-            filename = os.path.basename(existing_video['file_path'])
-            return web.json_response({
-                'success': True,
-                'title': existing_video.get('title', 'TikTok Video'),
-                'uploader': existing_video.get('uploader', 'Unknown'),
-                'file_id': existing_video['file_id'],
-                'video_url': existing_video['file_path'],
-                'from_cache': True
-            })
+            # Проверяем что файл существует
+            if existing_video.get('file_path') and os.path.exists(existing_video['file_path']):
+                file_size = os.path.getsize(existing_video['file_path'])
+                if file_size > 1024:  # Файл валидный
+                    logging.info("Видео найдено в кэше")
+                    return web.json_response({
+                        'success': True,
+                        'title': existing_video.get('title', 'TikTok Video'),
+                        'uploader': existing_video.get('uploader', 'Unknown'),
+                        'file_id': existing_video['file_id'],
+                        'video_url': existing_video['file_path'],
+                        'from_cache': True
+                    })
 
         # Скачиваем новое видео
         result = await downloader.download_video(url)
@@ -92,29 +94,48 @@ async def api_download(request):
                 'error': result.get('error', 'Ошибка скачивания')
             })
 
-        # Сохраняем в БД
-        video_id = await database.add_video(
-            url=url,
-            user_id=user_id,
-            username=username,
-            file_path=result['file_path'],
-            file_id=None,
-            title=result['title']
-        )
+        # ДОПОЛНИТЕЛЬНАЯ проверка файла
+        if not os.path.exists(result['file_path']):
+            return web.json_response({
+                'success': False,
+                'error': 'Файл не был создан'
+            })
 
-        filename = os.path.basename(result['file_path'])
+        file_size = os.path.getsize(result['file_path'])
+        if file_size < 1024:
+            if os.path.exists(result['file_path']):
+                os.remove(result['file_path'])
+            return web.json_response({
+                'success': False,
+                'error': 'Файл поврежден или пустой'
+            })
+
+        # Сохраняем в БД БЕЗ file_id (он будет добавлен после отправки)
+        try:
+            video_id = await database.add_video(
+                url=url,
+                user_id=user_id,
+                username=username,
+                file_path=result['file_path'],
+                file_id=None,  # НЕ сохраняем file_id до отправки
+                title=result['title']
+            )
+            logging.info(f"Видео {video_id} сохранено в БД (без file_id)")
+        except Exception as e:
+            logging.error(f"Ошибка сохранения в БД: {e}")
+            # Продолжаем даже если БД недоступна
 
         return web.json_response({
             'success': True,
             'title': result['title'],
             'uploader': result.get('uploader', 'Unknown'),
             'video_url': result['file_path'],
-            'video_id': video_id,
+            'video_id': video_id if 'video_id' in locals() else None,
             'from_cache': False
         })
 
     except Exception as e:
-        logging.error(f"API Error: {e}")
+        logging.error(f"API Error: {e}", exc_info=True)
         return web.json_response({
             'success': False,
             'error': str(e)
@@ -218,50 +239,85 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_new_video(update: Update, user, url: str):
     """Обработка нового видео - скачивание"""
     status_message = await update.message.reply_text('⏳ Начинаю скачивание...')
+
     try:
         # Скачивание видео
         result = await downloader.download_video(url)
 
+        # ВАЖНО: Проверяем успешность ПЕРЕД любыми действиями
         if not result['success']:
             await status_message.edit_text(f"❌ {result.get('error', 'Ошибка скачивания')}")
+            return
+
+        # Дополнительная проверка файла
+        if not os.path.exists(result['file_path']):
+            await status_message.edit_text('❌ Файл не был создан')
+            return
+
+        file_size = os.path.getsize(result['file_path'])
+        if file_size < 1024:  # Меньше 1 КБ
+            await status_message.edit_text('❌ Файл поврежден или пустой')
+            if os.path.exists(result['file_path']):
+                os.remove(result['file_path'])
             return
 
         # Обновляем статус
         await status_message.edit_text('📤 Отправляю видео...')
 
-        # Отправка видео пользователю с увеличенными таймаутами
-        with open(result['file_path'], 'rb') as video_file:
-            sent_message = await update.message.reply_video(
-                video=video_file,
-                caption=f"🎵 {result['title']}",
-                supports_streaming=True,
-                read_timeout=60,  # Таймаут чтения: 60 секунд
-                write_timeout=60  # Таймаут записи: 60 секунд
+        # Отправка видео пользователю
+        sent_message = None
+        try:
+            with open(result['file_path'], 'rb') as video_file:
+                sent_message = await update.message.reply_video(
+                    video=video_file,
+                    caption=f"🎵 {result['title']}",
+                    supports_streaming=True,
+                    read_timeout=60,
+                    write_timeout=60
+                )
+        except Exception as e:
+            logging.error(f"Ошибка отправки видео: {e}")
+            await status_message.edit_text(
+                '❌ Не удалось отправить видео в Telegram.\n'
+                'Файл слишком большой или поврежден.'
             )
+            # Удаляем поврежденный файл
+            if os.path.exists(result['file_path']):
+                os.remove(result['file_path'])
+            return
 
         # Удаляем статусное сообщение
         await status_message.delete()
 
-        # Сохраняем в БД с file_id
-        file_id = sent_message.video.file_id if sent_message.video else None
+        # ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ сохраняем в БД
+        if sent_message and sent_message.video:
+            file_id = sent_message.video.file_id
 
-        video_id = await database.add_video(
-            url=url,
-            user_id=user.id,
-            username=user.username,
-            file_path=result['file_path'],
-            file_id=file_id,
-            title=result['title']
-        )
-        logging.info(f"Новое видео {video_id} успешно скачано и отправлено пользователю {user.id}")
+            try:
+                video_id = await database.add_video(
+                    url=url,
+                    user_id=user.id,
+                    username=user.username,
+                    file_path=result['file_path'],
+                    file_id=file_id,
+                    title=result['title']
+                )
+                logging.info(f"✅ Видео {video_id} успешно сохранено в БД с file_id")
+            except Exception as e:
+                logging.error(f"Ошибка сохранения в БД: {e}")
+                # Видео отправлено, но не сохранено в БД - не критично
+        else:
+            logging.warning("Видео отправлено, но file_id не получен")
 
     except Exception as e:
-        logging.error(f"Ошибка при обработке видео: {e}")
-        await status_message.edit_text(
-            '❌ Произошла ошибка при обработке видео.\n'
-            'Попробуйте еще раз позже.'
-        )
-
+        logging.error(f"Ошибка при обработке видео: {e}", exc_info=True)
+        try:
+            await status_message.edit_text(
+                '❌ Произошла ошибка при обработке видео.\n'
+                'Попробуйте еще раз позже.'
+            )
+        except:
+            pass
 
 
 async def handle_existing_video(update: Update, user, url: str, video_data: dict):
