@@ -494,3 +494,61 @@ body {
     from { opacity: 0.3; }
     to { opacity: 0.8; }
 }
+
+/* === НОВЫЕ СТИЛИ ДЛЯ КНОПОК АНАЛИТИКИ === */
+.extra-buttons {
+    margin-top: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: relative;
+    z-index: 100; /* Поверх всего */
+}
+
+/* Общий стиль для обеих доп. кнопок - наследуем базу от .btn */
+.btn-donate, .btn-tg {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    background-color: transparent; /* Прозрачный фон для отличия от главной кнопки */
+    color: #555; /* Чуть темнее текст */
+    border: 1px dashed #333; /* Пунктирная граница для стиля "черновика" */
+    border-radius: 0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+    text-transform: lowercase; /* Маленькие буквы для стиля "тишины" */
+    letter-spacing: 1px;
+    position: relative;
+}
+
+/* Ховер-эффект для кнопки доната */
+.btn-donate:hover {
+    border-color: #555;
+    color: #888;
+    background-color: rgba(255, 255, 255, 0.02);
+    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+/* Ховер-эффект для кнопки телеграма */
+.btn-tg:hover {
+    border-color: #4a5a6a; /* Легкий синеватый оттенок */
+    color: #6a7a8a;
+    background-color: rgba(74, 90, 106, 0.05);
+}
+
+/* Анимация при нажатии */
+.btn-donate:active, .btn-tg:active {
+    transform: translateY(1px);
+    opacity: 0.7;
+}
+
+/* Убираем стандартные стили ссылок */
+a.btn-tg {
+    text-decoration: none;
+    line-height: normal;
+}

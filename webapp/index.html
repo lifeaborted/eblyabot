@@ -1,11 +1,92 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>silent tears downloader</title>
+
+    <!-- 1. META-TAGS -->
+    <meta property="og:title" content="Silent Tears Downloader">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://eblyabot.onrender.com">
+    <meta property="og:description" content="Download your sorrows from TikTok without watermarks.">
+    <meta property="og:image" content="static/gavno.png">
+
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="static/css/style.css">
+
+    <!-- 2. DATALAYER INIT -->
+    <script>
+        window.dataLayer = window.dataLayer || [];
+    </script>
+
+    <!-- 3. YANDEX METRICA CODE -->
+    <script type="text/javascript">
+        (function(m,e,t,r,i,k,a){
+            m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+            m[i].l=1*new Date();
+            for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+            k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+        })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=106654533', 'ym');
+
+        ym(106654533, 'init', {
+            ssr:true,
+            webvisor:true,
+            clickmap:true,
+            ecommerce:"dataLayer",
+            referrer: document.referrer,
+            url: location.href,
+            accurateTrackBounce:true,
+            trackLinks:true
+        });
+    </script>
+    <noscript><div><img src="https://mc.yandex.ru/watch/106654533" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+    <!-- /Yandex.Metrika counter -->
+
+    <style>
+        .card-image-container img, .card-image {
+            pointer-events: none; /* Клики проходят сквозь картинку */
+            position: relative;
+            z-index: 1; /* Картинка ниже кнопок */
+        }
+
+        /* === ИСПРАВЛЕНИЕ: КНОПКИ === */
+        .btn, .btn-donate, .btn-tg {
+            position: relative; /* Обязательно для работы z-index */
+            z-index: 100; /* Кнопки всегда поверх всего */
+        }
+
+        /* Остальные стили кнопок */
+        .btn-donate, .btn-tg {
+            background: transparent;
+            border: 1px solid #333;
+            color: #666;
+            margin-top: 15px;
+            font-size: 0.8em;
+            padding: 8px 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: block;
+            width: 100%;
+            margin-bottom: 5px;
+            text-align: center;
+            text-decoration: none;
+            box-sizing: border-box;
+        }
+        .btn-donate:hover, .btn-tg:hover {
+            border-color: #555;
+            color: #888;
+            box-shadow: 0 0 10px rgba(255,255,255,0.05);
+        }
+        .extra-buttons {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            position: relative;
+            z-index: 100;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -29,6 +110,12 @@
 
             <button id="downloadBtn" class="btn">download tears</button>
 
+            <!-- NEW ANALYTICS BUTTONS -->
+            <div class="extra-buttons">
+                <button class="btn-donate" id="donateBtn">support the void</button>
+                <a href="https://t.me/gruzdtbot" class="btn-tg" id="tgLink" target="_blank">open third eye</a>
+            </div>
+
             <div class="spinner" id="spinner"></div>
 
             <div class="status" id="status"></div>
@@ -41,7 +128,6 @@
 
         <div class="instructions">
             <h3>how to download your sorrows:</h3>
-
             <h3>✞ paste your url in the void above</h3>
             <h3>✞ click "download tears"</h3>
             <h3>✞ wait in solitude</h3>
@@ -58,10 +144,14 @@
     const tg = window.Telegram.WebApp;
     tg.expand();
 
-    document.body.style.backgroundColor = tg.themeParams.bg_color || '#0a0a0a';
+    try {
+        document.body.style.backgroundColor = tg.themeParams.bg_color || '#0a0a0a';
+    } catch(e) {}
 
     const urlInput = document.getElementById('url');
     const downloadBtn = document.getElementById('downloadBtn');
+    const donateBtn = document.getElementById('donateBtn');
+    const tgLink = document.getElementById('tgLink');
     const status = document.getElementById('status');
     const spinner = document.getElementById('spinner');
     const videoInfo = document.getElementById('videoInfo');
@@ -145,6 +235,50 @@
 
     tg.MainButton.onClick(sendVideo);
 
+    // --- ANALYTICS HANDLERS ---
+
+    // 1. DONATE BUTTON
+    donateBtn.addEventListener('click', () => {
+        console.log("Analytics: Fake Donation");
+
+        window.dataLayer.push({
+            "ecommerce": {
+                "currencyCode": "RUB",
+                "purchase": {
+                    "actionField": {
+                        "id": "VOID-" + Math.floor(Math.random() * 10000),
+                        "revenue": "100.00"
+                    },
+                    "products": [
+                        {
+                            "id": "DONATE_100",
+                            "name": "Donation to Void",
+                            "price": 100.00,
+                            "brand": "SilentTears",
+                            "category": "Donation",
+                            "quantity": 1
+                        }
+                    ]
+                }
+            }
+        });
+
+        if (typeof ym !== 'undefined') {
+            ym(106654533, 'reachGoal', 'donate_click');
+        }
+
+        alert("Спасибо (Test donate: данные о 'покупке' отправлены в Метрику)");
+    });
+
+    // 2. TELEGRAM LINK
+    tgLink.addEventListener('click', () => {
+        console.log("Analytics: Telegram Link Click");
+        if (typeof ym !== 'undefined') {
+            ym(106654533, 'reachGoal', 'click_telegram');
+        }
+    });
+
+    // 3. MAIN DOWNLOAD HANDLER
     downloadBtn.addEventListener('click', async () => {
         const url = urlInput.value.trim();
 
@@ -156,6 +290,11 @@
         if (!url.includes('tiktok.com')) {
             showStatus('not a tiktok link... just like nothing makes sense anymore', 'error');
             return;
+        }
+
+        // Analytics
+        if (typeof ym !== 'undefined') {
+            ym(106654533, 'reachGoal', 'try_download');
         }
 
         downloadBtn.disabled = true;
@@ -218,14 +357,11 @@
         status.className = `status ${type}`;
     }
 
-    // Add subtle sound of rain (console log only)
     window.addEventListener('load', () => {
         console.log('~rain drops on the window~');
-        console.log('another day, another download...');
         urlInput.focus();
     });
 
-    // Add a sad typing effect to the title
     const titleElement = document.querySelector('#titleText');
     const dotsElement = document.querySelector('#dots');
     const originalText = titleElement.textContent;
@@ -239,57 +375,22 @@
             setTimeout(typeWriter, 150);
         }
     }
-
     setTimeout(typeWriter, 1000);
 
-    // Cycling dots animation: 1 dot, 2 dots, 3 dots, then disappear
     function animateDots() {
         let dotCount = 0;
-        // Start with empty dots (0 dots) initially
         dotsElement.textContent = '';
-        
         const dotInterval = setInterval(() => {
             switch(dotCount) {
-                case 0:
-                    dotsElement.textContent = '.';
-                    break;
-                case 1:
-                    dotsElement.textContent = '..';
-                    break;
-                case 2:
-                    dotsElement.textContent = '...';
-                    break;
-                case 3:
-                    dotsElement.textContent = '';
-                    break;
+                case 0: dotsElement.textContent = '.'; break;
+                case 1: dotsElement.textContent = '..'; break;
+                case 2: dotsElement.textContent = '...'; break;
+                case 3: dotsElement.textContent = ''; break;
             }
             dotCount = (dotCount + 1) % 4;
-        }, 500); // Change every 500ms
+        }, 500);
     }
-
-    // Start the dot animation after the typing effect
     setTimeout(animateDots, 1000 + (originalText.length * 150));
-    </script>
-
-    <div id="debug-log" style="
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        max-height: 200px;
-        overflow-y: auto;
-        background: rgba(0,0,0,0.9);
-        color: #555;
-        font-family: monospace;
-        font-size: 10px;
-        padding: 10px;
-        display: none;
-    "></div>
-
-    <script>
-        if (new URLSearchParams(window.location.search).get('debug') === '1') {
-            document.getElementById('debug-log').style.display = 'block';
-        }
     </script>
 </body>
 </html>
