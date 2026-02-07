@@ -162,9 +162,10 @@ async def start_web_server():
 
     # Render передает порт через ENV. Если нет - используем 8080.
     port = int(os.environ.get('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-
+    # reuse_address=True и reuse_port=True помогают избежать проблем при редеплое
+    site = web.TCPSite(runner, '0.0.0.0', port, reuse_address=True, reuse_port=True)
     await site.start()
+
     logging.info(f"Веб-сервер запущен на порту {port}")
 
 
