@@ -125,21 +125,45 @@ async def start_web_server():
     """Запуск веб-сервера"""
     app = web.Application()
 
-    # Serve static files
-    app.add_routes([web.static('/static', 'webapp/static')])
+    # 1. Раздаем статику.
+    # Так как bot.py лежит в корне (eblyabot), а статика в webapp/static,
+    # мы указываем путь 'webapp/static'.
+    # Теперь файлы доступны по адресу https://site.com/static/style.css
+    app.add_routes([web.static('/static', os.path.join('webapp', 'static'))])
 
-    # Add other routes
+    # 2. Раздаем index.html.
+    # Он лежит в webapp/index.html.
+    async def serve_webapp(request):
+        file_path = os.path.join('webapp', 'index.html')
+        if not os.path.exists(file_path):
+            return web.Response(status=404, text="Index file not found in webapp/")
+        return web.FileResponse(file_path)
+
+    # Главная страница
     app.router.add_get('/', serve_webapp)
+
+    # 3. Маршрут для отдачи скачанных видео (если нужно)
+    async def serve_video(request):
+        filename = request.match_info['filename']
+        # Проверяем, где лежат видео. Если в папке downloads_main рядом с bot.py:
+        file_path = os.path.join('downloads_main', filename)
+        if not os.path.exists(file_path):
+            return web.Response(status=404, text="Video not found")
+        return web.FileResponse(file_path)
+
     app.router.add_get('/videos/{filename}', serve_video)
+
+    # 4. API Маршруты
     app.router.add_post('/api/download', api_download)
     app.router.add_post('/api/send', api_send)
 
     runner = web.AppRunner(app)
     await runner.setup()
-    
-    # Use PORT from environment or default to 8080
+
+    # Render передает порт через ENV. Если нет - используем 8080.
     port = int(os.environ.get('PORT', 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
+
     await site.start()
     logging.info(f"Веб-сервер запущен на порту {port}")
 
