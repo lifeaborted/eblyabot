@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>silent tears downloader</title>
+    <title>TikTok Downloader</title>
 
     <!-- 1. GOOGLE ANALYTICS 4 (GA4) - ADDED -->
     <!-- Google tag (gtag.js) -->
@@ -17,11 +17,11 @@
     <!-- END GA4 -->
 
     <!-- 2. META-TAGS -->
-    <meta property="og:title" content="Silent Tears Downloader">
+    <meta property="og:title" content="TikTok Downloader">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://eblyabot.onrender.com">
-    <meta property="og:description" content="Download your sorrows from TikTok without watermarks.">
-    <meta property="og:image" content="static/gavno.png">
+    <meta property="og:description" content="Download TikTok videos without watermarks.">
+    <meta property="og:image" content="static/preview.png">
     <link rel="icon" type="image/png" href="static/favicon.jpg">
 
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -133,14 +133,14 @@
     <div class="container">
         <div class="card">
             <div class="card-image-container">
-                <img src="static/gavno.png" alt="gavno" class="card-image">
+                <img src="static/preview.png" alt="preview" class="card-image">
             </div>
             <div class="header">
-                <h1><span id="titleText">silent tears downloader</span><span id="dots"></span></h1>
+                <h1><span id="titleText">tiktok downloader</span><span id="dots"></span></h1>
             </div>
 
             <div class="input-group">
-                <label class="label" for="url">paste your lonely url here:</label>
+                <label class="label" for="url">paste the tiktok url:</label>
                 <input
                     type="text"
                     id="url"
@@ -149,12 +149,12 @@
                 >
             </div>
 
-            <button id="downloadBtn" class="btn">download tears</button>
+            <button id="downloadBtn" class="btn">download</button>
 
             <!-- ANALYTICS BUTTONS -->
             <div class="extra-buttons">
-                <button class="btn-donate" id="donateBtn">buy me a beer</button>
-                <a href="https://t.me/gruzdtbot" class="btn-tg" id="tgLink" target="_blank">open third eye</a>
+                <button class="btn-donate" id="donateBtn">donate</button>
+                <a href="https://t.me/gruzdtbot" class="btn-tg" id="tgLink" target="_blank">open telegram</a>
             </div>
 
             <div class="spinner" id="spinner"></div>
@@ -168,16 +168,16 @@
         </div>
 
         <div class="instructions">
-            <h3>how to download your sorrows:</h3>
-            <h3>✞ paste your url in the void above</h3>
-            <h3>✞ click "download tears"</h3>
-            <h3>✞ wait in solitude</h3>
-            <h3>✞ send to your empty chat</h3>
+            <h3>how to download:</h3>
+            <h3>- paste a tiktok url above</h3>
+            <h3>- click "download"</h3>
+            <h3>- wait for processing</h3>
+            <h3>- send to your chat</h3>
         </div>
 
         <div class="footer">
-            <p>made with no hope | in memory of forgotten downloads</p>
-            <p class="silence-glow">the silence continues...</p>
+            <p>built for convenient downloads</p>
+            <p class="silence-glow">ready when you are</p>
         </div>
     </div>
 
@@ -204,7 +204,7 @@
 
     function getUserData() {
         let userId = 0;
-        let username = 'lonely_soul';
+        let username = 'guest';
         let chatId = null;
 
         const urlParams = new URLSearchParams(window.location.search);
@@ -213,7 +213,7 @@
 
         if (urlUserId) {
             userId = parseInt(urlUserId);
-            username = urlUsername || 'lonely_soul';
+            username = urlUsername || 'guest';
         }
 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
@@ -230,11 +230,11 @@
 
     async function sendVideo() {
         if (!currentVideo) {
-            showStatus('no video to send... just like no one to talk to', 'error');
+            showStatus('No video to send.', 'error');
             return;
         }
 
-        showStatus('sending video into the void...', 'loading');
+        showStatus('Sending video...', 'loading');
         tg.MainButton.showProgress();
 
         try {
@@ -258,18 +258,18 @@
             const data = await response.json();
 
             if (data.success) {
-                showStatus('video sent... but will anyone watch?', 'success');
+                showStatus('Video sent.', 'success');
                 setTimeout(() => {
                     tg.close();
                 }, 2000);
             } else {
-                showStatus(`error: ${data.error}... just like everything else`, 'error');
+                showStatus(`Error: ${data.error}`, 'error');
                 tg.MainButton.hideProgress();
             }
 
         } catch (error) {
             console.error('Error sending video:', error);
-            showStatus('connection failed... just like everything else', 'error');
+            showStatus('Connection failed.', 'error');
             tg.MainButton.hideProgress();
         }
     }
@@ -346,12 +346,12 @@
         const url = urlInput.value.trim();
 
         if (!url) {
-            showStatus('no url provided... just like no purpose', 'error');
+            showStatus('Please enter a URL.', 'error');
             return;
         }
 
         if (!url.includes('tiktok.com')) {
-            showStatus('not a tiktok link... just like nothing makes sense anymore', 'error');
+            showStatus('Please enter a valid TikTok link.', 'error');
             return;
         }
 
@@ -367,7 +367,7 @@
 
         downloadBtn.disabled = true;
         spinner.classList.add('active');
-        showStatus('downloading... another moment of false hope', 'loading');
+        showStatus('Downloading...', 'loading');
         videoInfo.style.display = 'none';
         tg.MainButton.hide();
 
@@ -401,19 +401,19 @@
                 videoAuthor.textContent = `uploader: ${data.uploader || 'unknown entity'}`;
                 videoInfo.style.display = 'block';
 
-                showStatus('download complete... temporary relief', 'success');
+                showStatus('Download complete.', 'success');
 
-                tg.MainButton.setText('send into void');
+                tg.MainButton.setText('Send to Telegram');
                 tg.MainButton.show();
                 tg.MainButton.enable();
 
             } else {
-                showStatus(`error: ${data.error}... expected nothing less`, 'error');
+                showStatus(`Error: ${data.error}`, 'error');
             }
 
         } catch (error) {
             console.error('Error:', error);
-            showStatus('failed again... why am I surprised?', 'error');
+            showStatus('Request failed. Please try again.', 'error');
         } finally {
             downloadBtn.disabled = false;
             spinner.classList.remove('active');

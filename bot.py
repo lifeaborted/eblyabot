@@ -2,10 +2,29 @@ import os
 import logging
 import json
 from aiohttp import web
-from telegram import Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, \
-    InlineKeyboardMarkup, InlineQueryResultVideo, InlineQueryResultCachedVideo, InputTextMessageContent, \
-    InlineQueryResultArticle, MenuButtonWebApp, ReplyKeyboardRemove
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, InlineQueryHandler, ChosenInlineResultHandler
+from telegram import (
+    Update,
+    WebAppInfo,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InlineQueryResultVideo,
+    InlineQueryResultCachedVideo,
+    InputTextMessageContent,
+    InlineQueryResultArticle,
+    MenuButtonWebApp,
+    ReplyKeyboardRemove,
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    InlineQueryHandler,
+    ChosenInlineResultHandler,
+)
 
 from dotenv import load_dotenv
 import uuid
@@ -17,15 +36,14 @@ from downloader import TikTokDownloader
 load_dotenv()
 
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
-BOT_TOKEN = os.getenv('BOT_TOKEN')
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN не найден! Проверьте файл .env")
 
-SERVER_URL = os.getenv('SERVER_URL')
+SERVER_URL = os.getenv("SERVER_URL")
 
 downloader = TikTokDownloader()
 
@@ -35,15 +53,15 @@ bot_app = None  # Глобальная переменная для доступ�
 # ============ WEB SERVER ============
 async def serve_webapp(request):
     """Отдача Web App интерфейса"""
-    with open('webapp/index.html', 'r', encoding='utf-8') as f:
+    with open("webapp/index.html", "r", encoding="utf-8") as f:
         html = f.read()
-    return web.Response(text=html, content_type='text/html')
+    return web.Response(text=html, content_type="text/html")
 
 
 async def serve_video(request):
     """Отдача видео файлов"""
-    filename = request.match_info['filename']
-    file_path = os.path.join('downloads_main', filename)
+    filename = request.match_info["filename"]
+    file_path = os.path.join("downloads_main", filename)
 
     if not os.path.exists(file_path):
         return web.Response(status=404, text="File not found")
@@ -56,69 +74,68 @@ async def api_download(request):
     try:
         data = await request.json()
         logging.info(data)
-        url = data.get('url')
-        user_id = data.get('user_id')
-        username = data.get('username')
+        url = data.get("url")
+        user_id = data.get("user_id")
+        username = data.get("username")
 
         if not user_id:
             user_id = 000
 
-        if not url or 'tiktok.com' not in url.lower():
-            return web.json_response({
-                'success': False,
-                'error': 'Неверная ссылка на TikTok'
-            })
+        if not url or "tiktok.com" not in url.lower():
+            return web.json_response(
+                {"success": False, "error": "Неверная ссылка на TikTok"}
+            )
 
         # Проверяем кэш
         existing_video = await database.get_video_by_url(url)
 
-        if existing_video and existing_video.get('file_id'):
-            filename = os.path.basename(existing_video['file_path'])
-            return web.json_response({
-                'success': True,
-                'title': existing_video.get('title', 'TikTok Video'),
-                'uploader': existing_video.get('uploader', 'Unknown'),
-                'file_id': existing_video['file_id'],
-                'video_url': existing_video['file_path'],
-                'from_cache': True
-            })
+        if existing_video and existing_video.get("file_id"):
+            filename = os.path.basename(existing_video["file_path"])
+            return web.json_response(
+                {
+                    "success": True,
+                    "title": existing_video.get("title", "TikTok Video"),
+                    "uploader": existing_video.get("uploader", "Unknown"),
+                    "file_id": existing_video["file_id"],
+                    "video_url": existing_video["file_path"],
+                    "from_cache": True,
+                }
+            )
 
         # Скачиваем новое видео
         result = await downloader.download_video(url)
 
-        if not result['success']:
-            return web.json_response({
-                'success': False,
-                'error': result.get('error', 'Ошибка скачивания')
-            })
+        if not result["success"]:
+            return web.json_response(
+                {"success": False, "error": result.get("error", "Ошибка скачивания")}
+            )
 
         # Сохраняем в БД
         video_id = await database.add_video(
             url=url,
             user_id=user_id,
             username=username,
-            file_path=result['file_path'],
+            file_path=result["file_path"],
             file_id=None,
-            title=result['title']
+            title=result["title"],
         )
 
-        filename = os.path.basename(result['file_path'])
+        filename = os.path.basename(result["file_path"])
 
-        return web.json_response({
-            'success': True,
-            'title': result['title'],
-            'uploader': result.get('uploader', 'Unknown'),
-            'video_url': result['file_path'],
-            'video_id': video_id,
-            'from_cache': False
-        })
+        return web.json_response(
+            {
+                "success": True,
+                "title": result["title"],
+                "uploader": result.get("uploader", "Unknown"),
+                "video_url": result["file_path"],
+                "video_id": video_id,
+                "from_cache": False,
+            }
+        )
 
     except Exception as e:
         logging.error(f"API Error: {e}")
-        return web.json_response({
-            'success': False,
-            'error': str(e)
-        })
+        return web.json_response({"success": False, "error": str(e)})
 
 
 async def start_web_server():
@@ -129,41 +146,41 @@ async def start_web_server():
     # Так как bot.py лежит в корне (eblyabot), а статика в webapp/static,
     # мы указываем путь 'webapp/static'.
     # Теперь файлы доступны по адресу https://site.com/static/style.css
-    app.add_routes([web.static('/static', os.path.join('webapp', 'static'))])
+    app.add_routes([web.static("/static", os.path.join("webapp", "static"))])
 
     # 2. Раздаем index.html.
     # Он лежит в webapp/index.html.
     async def serve_webapp(request):
-        file_path = os.path.join('webapp', 'index.html')
+        file_path = os.path.join("webapp", "index.html")
         if not os.path.exists(file_path):
             return web.Response(status=404, text="Index file not found in webapp/")
         return web.FileResponse(file_path)
 
     # Главная страница
-    app.router.add_get('/', serve_webapp)
+    app.router.add_get("/", serve_webapp)
 
     # 3. Маршрут для отдачи скачанных видео (если нужно)
     async def serve_video(request):
-        filename = request.match_info['filename']
+        filename = request.match_info["filename"]
         # Проверяем, где лежат видео. Если в папке downloads_main рядом с bot.py:
-        file_path = os.path.join('downloads_main', filename)
+        file_path = os.path.join("downloads_main", filename)
         if not os.path.exists(file_path):
             return web.Response(status=404, text="Video not found")
         return web.FileResponse(file_path)
 
-    app.router.add_get('/videos/{filename}', serve_video)
+    app.router.add_get("/videos/{filename}", serve_video)
 
     # 4. API Маршруты
-    app.router.add_post('/api/download', api_download)
-    app.router.add_post('/api/send', api_send)
+    app.router.add_post("/api/download", api_download)
+    app.router.add_post("/api/send", api_send)
 
     runner = web.AppRunner(app)
     await runner.setup()
 
     # Render передает порт через ENV. Если нет - используем 8080.
-    port = int(os.environ.get('PORT', 8080))
+    port = int(os.environ.get("PORT", 8080))
     # reuse_address=True и reuse_port=True помогают избежать проблем при редеплое
-    site = web.TCPSite(runner, '0.0.0.0', port, reuse_address=True, reuse_port=True)
+    site = web.TCPSite(runner, "0.0.0.0", port, reuse_address=True, reuse_port=True)
     await site.start()
 
     logging.info(f"Веб-сервер запущен на порту {port}")
@@ -176,11 +193,11 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
         user = update.effective_user
         logging.info(data)
 
-        if data.get('action') == 'send_video':
-            url = data.get('url')  # Добавим URL для обновления БД
-            file_id = data.get('file_id')
-            video_url = data.get('video_url')
-            title = data.get('title', 'TikTok Video')
+        if data.get("action") == "send_video":
+            url = data.get("url")  # Добавим URL для обновления БД
+            file_id = data.get("file_id")
+            video_url = data.get("video_url")
+            title = data.get("title", "TikTok Video")
 
             sent_message = None
 
@@ -191,7 +208,7 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                     caption=f"🎵 {title}",
                     supports_streaming=True,
                     read_timeout=60,
-                    write_timeout=60
+                    write_timeout=60,
                 )
             elif video_url:
                 # Отправляем по URL
@@ -200,7 +217,7 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                     caption=f"🎵 {title}",
                     supports_streaming=True,
                     read_timeout=60,
-                    write_timeout=60
+                    write_timeout=60,
                 )
 
             # ВАЖНО: Сохраняем file_id в БД после отправки
@@ -224,11 +241,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     # Обработка TikTok ссылок
-    if 'tiktok.com' not in text.lower():
+    if "tiktok.com" not in text.lower():
         await update.message.reply_text(
-            '🎵 Ты еблан?\n\n',
-            parse_mode='Markdown',
-            reply_markup=ReplyKeyboardRemove()
+            "🎵 Пожалуйста, пришлите ссылку на TikTok.\n",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
 
@@ -242,26 +259,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_new_video(update: Update, user, url: str):
     """Обработка нового видео - скачивание"""
-    status_message = await update.message.reply_text('⏳ Начинаю скачивание...')
+    status_message = await update.message.reply_text("⏳ Начинаю скачивание...")
     try:
         # Скачивание видео
         result = await downloader.download_video(url)
 
-        if not result['success']:
-            await status_message.edit_text(f"❌ {result.get('error', 'Ошибка скачивания')}")
+        if not result["success"]:
+            await status_message.edit_text(
+                f"❌ {result.get('error', 'Ошибка скачивания')}"
+            )
             return
 
         # Обновляем статус
-        await status_message.edit_text('📤 Отправляю видео...')
+        await status_message.edit_text("📤 Отправляю видео...")
 
         # Отправка видео пользователю с увеличенными таймаутами
-        with open(result['file_path'], 'rb') as video_file:
+        with open(result["file_path"], "rb") as video_file:
             sent_message = await update.message.reply_video(
                 video=video_file,
                 caption=f"🎵 {result['title']}",
                 supports_streaming=True,
                 read_timeout=60,  # Таймаут чтения: 60 секунд
-                write_timeout=60  # Таймаут записи: 60 секунд
+                write_timeout=60,  # Таймаут записи: 60 секунд
             )
 
         # Удаляем статусное сообщение
@@ -274,45 +293,49 @@ async def handle_new_video(update: Update, user, url: str):
             url=url,
             user_id=user.id,
             username=user.username,
-            file_path=result['file_path'],
+            file_path=result["file_path"],
             file_id=file_id,
-            title=result['title']
+            title=result["title"],
         )
-        logging.info(f"Новое видео {video_id} успешно скачано и отправлено пользователю {user.id}")
+        logging.info(
+            f"Новое видео {video_id} успешно скачано и отправлено пользователю {user.id}"
+        )
 
     except Exception as e:
         logging.error(f"Ошибка при обработке видео: {e}")
         await status_message.edit_text(
-            '❌ Произошла ошибка при обработке видео.\n'
-            'Попробуйте еще раз позже.'
+            "❌ Произошла ошибка при обработке видео.\nПопробуйте еще раз позже."
         )
-
 
 
 async def handle_existing_video(update: Update, user, url: str, video_data: dict):
     """Обработка существующего видео из БД"""
     try:
-        if video_data.get('file_id'):
+        if video_data.get("file_id"):
             try:
                 sent_message = await update.message.reply_video(
-                    video=video_data['file_id'],
+                    video=video_data["file_id"],
                     caption=f"🎵 {video_data.get('title', 'TikTok Video')}",
-                    supports_streaming=True
+                    supports_streaming=True,
                 )
-                await database.update_video_file_id(url, video_data.get('file_id'))
-                logging.info(f"Видео отправлено из кэша (file_id) пользователю {user.id}")
+                await database.update_video_file_id(url, video_data.get("file_id"))
+                logging.info(
+                    f"Видео отправлено из кэша (file_id) пользователю {user.id}"
+                )
                 return
             except Exception as e:
                 logging.warning(f"Не удалось отправить через file_id: {e}")
 
-        if video_data.get('file_path'):
-            status_message = await update.message.reply_text('📤 Отправляю видео из кэша...')
+        if video_data.get("file_path"):
+            status_message = await update.message.reply_text(
+                "📤 Отправляю видео из кэша..."
+            )
 
-            with open(video_data['file_path'], 'rb') as video_file:
+            with open(video_data["file_path"], "rb") as video_file:
                 sent_message = await update.message.reply_video(
                     video=video_file,
                     caption=f"🎵 {video_data.get('title', 'TikTok Video')}",
-                    supports_streaming=True
+                    supports_streaming=True,
                 )
 
             if sent_message.video:
@@ -322,7 +345,7 @@ async def handle_existing_video(update: Update, user, url: str, video_data: dict
             logging.info(f"Видео отправлено из файла пользователю {user.id}")
             return
 
-        await update.message.reply_text('⚠️ Файл не найден в кэше. Скачиваю заново...')
+        await update.message.reply_text("⚠️ Файл не найден в кэше. Скачиваю заново...")
         await handle_new_video(update, user, url)
 
     except Exception as e:
@@ -336,29 +359,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     # URL с debug режимом
-    normal_url = f"{SERVER_URL}/?user_id={user.id}&username={user.username or 'unknown'}"
-
+    normal_url = (
+        f"{SERVER_URL}/?user_id={user.id}&username={user.username or 'unknown'}"
+    )
 
     try:
         await context.bot.set_chat_menu_button(
             chat_id=user.id,
             menu_button=MenuButtonWebApp(
-                text="насрать",
-                web_app=WebAppInfo(url=normal_url)
-            )
+                text="Открыть веб-приложение", web_app=WebAppInfo(url=normal_url)
+            ),
         )
 
         await update.message.reply_text(
-            f'Привет, {user.first_name}! 👋\n\n'
-            '🎵 Способы использования:\n\n'
-            '1️⃣ Нажми на кнопку для скачивания с сайта\n'
-            '2️⃣ Отправь мне ссылку прямо в чат',
-            reply_markup=ReplyKeyboardRemove()
+            f"Привет, {user.first_name}! 👋\n\n"
+            "🎵 Способы использования:\n\n"
+            "1️⃣ Нажми на кнопку для скачивания с сайта\n"
+            "2️⃣ Отправь мне ссылку прямо в чат",
+            reply_markup=ReplyKeyboardRemove(),
         )
     except Exception as e:
         logging.error(f"Error setting menu button: {e}")
-
-
 
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -367,18 +388,18 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     videos = await database.get_user_videos(user.id)
 
     if not videos:
-        await update.message.reply_text('📭 У тебя пока нет истории скачиваний.')
+        await update.message.reply_text("📭 У тебя пока нет истории скачиваний.")
         return
 
-    message = '📋 Твоя история скачиваний:\n\n'
+    message = "📋 Твоя история скачиваний:\n\n"
     for i, video in enumerate(videos[:10], 1):
-        title = video.get('title', 'TikTok Video')
+        title = video.get("title", "TikTok Video")
         message += f"{i}. {title[:30]}...\n"
         message += f"   📅 {video['created_at']}\n"
         message += f"   🔗 {video['url'][:40]}...\n\n"
 
     if len(videos) > 10:
-        message += f'...и еще {len(videos) - 10} видео'
+        message += f"...и еще {len(videos) - 10} видео"
 
     await update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
 
@@ -390,10 +411,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_videos = await database.get_total_videos()
 
     message = (
-        f'📊 Статистика:\n\n'
-        f'🎥 Твоих скачиваний: {len(user_videos)}\n'
-        f'🌍 Всего скачиваний в боте: {total_videos}\n'
-        f'👤 Твой ID: {user.id}'
+        f"📊 Статистика:\n\n"
+        f"🎥 Твоих скачиваний: {len(user_videos)}\n"
+        f"🌍 Всего скачиваний в боте: {total_videos}\n"
+        f"👤 Твой ID: {user.id}"
     )
 
     await update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
@@ -401,17 +422,20 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def raupov(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /raupov"""
-    await update.message.reply_text('Раупов согласны', reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(
+        "Раупов согласны", reply_markup=ReplyKeyboardRemove()
+    )
 
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
     await update.message.reply_text(
-        '/start - начать работу\n'
-        '/history - твоя история скачиваний\n'
-        '/stats - статистика\n'
-        '/help - помощь',
-        reply_markup=ReplyKeyboardRemove())
+        "/start - начать работу\n"
+        "/history - твоя история скачиваний\n"
+        "/stats - статистика\n"
+        "/help - помощь",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 
 async def post_init(application: Application):
@@ -423,6 +447,7 @@ async def post_init(application: Application):
     logging.info("База данных инициализирована")
 
     import asyncio
+
     asyncio.create_task(start_web_server())
 
 
@@ -437,40 +462,38 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_videos = await database.get_all_videos()
 
         for video in all_videos:
-            if video.get('file_id'):
+            if video.get("file_id"):
                 # Кодируем URL в ID, чтобы можно было восстановить при выборе
                 result_id = f"cached_{video['video_id']}_{uuid.uuid4()}"  # или просто использовать video['url']
                 results.append(
                     InlineQueryResultCachedVideo(
                         id=result_id,  # используем специальный ID
-                        video_file_id=video['file_id'],
+                        video_file_id=video["file_id"],
                         title=f"{video.get('title', 'TikTok Video')}",
-                        description=f"{video['created_at']} by {video['username']}"
+                        description=f"{video['created_at']} by {video['username']}",
                     )
                 )
     # Если введена ссылка
-    elif 'tiktok.com' in query.lower():
+    elif "tiktok.com" in query.lower():
         existing_video = await database.get_video_by_url(query)
 
-        if existing_video and existing_video.get('file_id'):
+        if existing_video and existing_video.get("file_id"):
             results.append(
                 InlineQueryResultCachedVideo(
                     id=str(uuid.uuid4()),
-                    video_file_id=existing_video['file_id'],
+                    video_file_id=existing_video["file_id"],
                     title=f"🎵 {existing_video.get('title', 'TikTok Video')[:50]}",
-                    description="♻️ Из кэша"
+                    description="♻️ Из кэша",
                 )
             )
-            #await database.update_video_file_id(existing_video['url'], existing_video['file_id'])
+            # await database.update_video_file_id(existing_video['url'], existing_video['file_id'])
         else:
             results.append(
                 InlineQueryResultArticle(
                     id=str(uuid.uuid4()),
                     title="⏳ Видео не скачано",
                     description="Скачать...",
-                    input_message_content=InputTextMessageContent(
-                        message_text=query
-                    )
+                    input_message_content=InputTextMessageContent(message_text=query),
                 )
             )
 
@@ -483,26 +506,30 @@ async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.chosen_inline_result.from_user
 
     # Если был запрос с URL, обрабатываем как раньше
-    if 'tiktok.com' in query.lower():
+    if "tiktok.com" in query.lower():
         existing_video = await database.get_video_by_url(query)
-        if existing_video and existing_video.get('file_id'):
-            await database.update_video_file_id(existing_video['url'], existing_video['file_id'])
+        if existing_video and existing_video.get("file_id"):
+            await database.update_video_file_id(
+                existing_video["url"], existing_video["file_id"]
+            )
             logging.info(
-                f"Выбрано кэшированное видео (по URL) из инлайн запроса для URL: {query}, пользователь: {user.id}")
+                f"Выбрано кэшированное видео (по URL) из инлайн запроса для URL: {query}, пользователь: {user.id}"
+            )
     # Если был пустой запрос и пользователь выбрал одно из видео
-    elif result_id.startswith('cached_'):
+    elif result_id.startswith("cached_"):
         # Извлекаем video_id из result_id
         try:
             # Формат: cached_{video_id}_{uuid}
-            parts = result_id.split('_')
+            parts = result_id.split("_")
             if len(parts) >= 2:
                 video_id = int(parts[1])
                 # Получаем видео по ID из базы
                 video = await database.get_video_by_id(video_id)
-                if video and video.get('file_id'):
-                    await database.update_video_file_id(video['url'], video['file_id'])
+                if video and video.get("file_id"):
+                    await database.update_video_file_id(video["url"], video["file_id"])
                     logging.info(
-                        f"Выбрано кэшированное видео (по ID) из инлайн запроса для URL: {video['url']}, пользователь: {user.id}")
+                        f"Выбрано кэшированное видео (по ID) из инлайн запроса для URL: {video['url']}, пользователь: {user.id}"
+                    )
         except (ValueError, IndexError):
             logging.error(f"Невозможно извлечь video_id из result_id: {result_id}")
 
@@ -514,23 +541,21 @@ async def api_send(request):
         logging.info(f"=== API Send Request ===")
         logging.info(f"Request data: {data}")
 
-        user_id = data.get('user_id')
-        chat_id = data.get('chat_id') or user_id
-        url = data.get('url')
-        file_id = data.get('file_id')
-        video_url = data.get('video_url')
-        title = data.get('title', 'TikTok Video')
+        user_id = data.get("user_id")
+        chat_id = data.get("chat_id") or user_id
+        url = data.get("url")
+        file_id = data.get("file_id")
+        video_url = data.get("video_url")
+        title = data.get("title", "TikTok Video")
 
         logging.info(f"user_id={user_id}, chat_id={chat_id}")
 
         if not user_id:
-            return web.json_response({
-                'success': False,
-                'error': 'user_id обязателен'
-            })
+            return web.json_response({"success": False, "error": "user_id обязателен"})
 
         # Создаем новый экземпляр Bot
         from telegram import Bot
+
         bot = Bot(token=BOT_TOKEN)
 
         sent_message = None
@@ -544,7 +569,7 @@ async def api_send(request):
                     video=file_id,
                     caption=f"🎵 {title}",
                     read_timeout=60,
-                    write_timeout=60
+                    write_timeout=60,
                 )
                 logging.info("✅ Successfully sent via file_id")
             except Exception as e:
@@ -559,7 +584,7 @@ async def api_send(request):
                     video=video_url,
                     caption=f"🎵 {title}",
                     read_timeout=60,
-                    write_timeout=60
+                    write_timeout=60,
                 )
                 logging.info("✅ Successfully sent via video_url")
             except Exception as e:
@@ -574,22 +599,15 @@ async def api_send(request):
         logging.info("=== End API Send Request ===")
 
         if sent_message:
-            return web.json_response({
-                'success': True,
-                'message': 'Видео отправлено'
-            })
+            return web.json_response({"success": True, "message": "Видео отправлено"})
         else:
-            return web.json_response({
-                'success': False,
-                'error': 'Не удалось отправить видео'
-            })
+            return web.json_response(
+                {"success": False, "error": "Не удалось отправить видео"}
+            )
 
     except Exception as e:
         logging.error(f"❌ API send error: {e}", exc_info=True)
-        return web.json_response({
-            'success': False,
-            'error': str(e)
-        })
+        return web.json_response({"success": False, "error": str(e)})
 
 
 def main():
@@ -598,7 +616,7 @@ def main():
         connect_timeout=30.0,
         read_timeout=60.0,
         write_timeout=60.0,
-        pool_timeout=10.0
+        pool_timeout=10.0,
     )
 
     application = (
@@ -609,7 +627,6 @@ def main():
         .build()
     )
 
-
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("history", history))
     application.add_handler(CommandHandler("stats", stats))
@@ -617,12 +634,16 @@ def main():
     application.add_handler(CommandHandler("help", help))
     application.add_handler(InlineQueryHandler(inline_query))
     application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(
+        MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data)
+    )
+    application.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    )
 
     logging.info("Бот запущен!")
     application.run_polling()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -1,20 +1,41 @@
 services:
+  postgres:
+    image: postgres:16
+    container_name: tiktok-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eblyabot}
+      POSTGRES_USER: ${POSTGRES_USER:-eblya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eblya_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   tiktok-bot:
     build: .
     container_name: tiktok-bot
     restart: unless-stopped
-    volumes:
-      - ./data:/var/task/data
-      - ./downloads:/var/task/downloads
+    depends_on:
+      - postgres
     env_file:
       - .env
     environment:
-      - TZ=Europe/Moscow
-      - PYTHONUNBUFFERED=1
-      - DATABASE_DIR=/var/task/data
-      - DOWNLOAD_DIR=/var/task/downloads
+      TZ: ${TZ:-Europe/Moscow}
+      PYTHONUNBUFFERED: 1
+      DB_TYPE: ${DB_TYPE:-postgresql}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-eblya}:${POSTGRES_PASSWORD:-eblya_password}@postgres:5432/${POSTGRES_DB:-eblyabot}}
+      DOWNLOAD_DIR: ${DOWNLOAD_DIR:-/app/downloads_main}
+      SERVER_URL: ${SERVER_URL:-http://localhost:8080}
+    volumes:
+      - ./downloads:/app/downloads_main
+    ports:
+      - "8080:8080"
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  pgdata:
