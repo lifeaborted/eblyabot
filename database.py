@@ -1,10 +1,9 @@
 import logging
 import os
+import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-
-# Determine database type based on environment
-DB_TYPE = os.getenv('DB_TYPE', 'sqlite').lower()  # Can be 'sqlite' or 'postgresql'
+from config import DATABASE_NAME, DATABASE_URL, DB_TYPE
 
 if DB_TYPE == 'postgresql':
     import asyncpg
@@ -13,8 +12,7 @@ else:
     import aiosqlite
     HAS_ASPG = False
 
-DATABASE_NAME = os.getenv('DATABASE_NAME', 'bot_data.db')
-DATABASE_URL = os.getenv('DATABASE_URL')  # For PostgreSQL
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -25,12 +23,10 @@ class DatabaseManager:
     async def init_db(self):
         """Initialize database connection and create tables"""
         if self.db_type == 'postgresql' and DATABASE_URL:
-            # Initialize PostgreSQL
             self.pool = await asyncpg.create_pool(DATABASE_URL)
             async with self.pool.acquire() as conn:
                 await self._create_postgres_tables(conn)
         else:
-            # Initialize SQLite
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 await self._create_sqlite_tables(db)
     
@@ -45,10 +41,18 @@ class DatabaseManager:
                 title TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT,
+                media_type TEXT DEFAULT 'video',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         await db.commit()
+
+        # Check column migration for media_type
+        try:
+            await db.execute('ALTER TABLE videos ADD COLUMN media_type TEXT DEFAULT "video"')
+            await db.commit()
+        except Exception:
+            pass # Column already exists
         
     async def _create_postgres_tables(self, conn):
         """Create tables for PostgreSQL database"""
@@ -61,31 +65,39 @@ class DatabaseManager:
                 title TEXT,
                 user_id INTEGER NOT NULL,
                 username TEXT,
+                media_type TEXT DEFAULT 'video',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Postgres migration check
+        try:
+            await conn.execute('ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_type TEXT DEFAULT \'video\'')
+        except Exception as e:
+            logger.debug(f"Postgres column check: {e}")
     
     async def add_video(self, url: str, user_id: int, username: str = None,
                        file_path: str = None, file_id: str = None,
-                       title: str = None):
-        """Добавление нового видео в базу данных"""
+                       title: str = None, media_type: str = 'video'):
+        """Добавление нового видео или группы фото в базу данных"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 result = await conn.fetchval(
                     '''INSERT INTO videos
-                       (url, user_id, username, file_path, file_id, title)
-                       VALUES ($1, $2, $3, $4, $5, $6) 
+                       (url, user_id, username, file_path, file_id, title, media_type)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+                       ON CONFLICT (url) DO UPDATE 
+                       SET file_id = EXCLUDED.file_id, file_path = EXCLUDED.file_path, title = EXCLUDED.title, media_type = EXCLUDED.media_type
                        RETURNING video_id''',
-                    url, user_id, username, file_path, file_id, title
+                    url, user_id, username, file_path, file_id, title, media_type
                 )
                 return result
         else:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 cursor = await db.execute(
-                    '''INSERT INTO videos
-                       (url, user_id, username, file_path, file_id, title)
-                       VALUES (?, ?, ?, ?, ?, ?)''',
-                    (url, user_id, username, file_path, file_id, title)
+                    '''INSERT OR REPLACE INTO videos
+                       (url, user_id, username, file_path, file_id, title, media_type)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (url, user_id, username, file_path, file_id, title, media_type)
                 )
                 await db.commit()
                 return cursor.lastrowid
@@ -163,7 +175,7 @@ class DatabaseManager:
                 )
                 await db.commit()
         
-        logging.info("\nобнова в бд\n")
+        logger.info(f"Обновлен file_id в БД для URL: {url}")
 
     async def get_total_videos(self) -> int:
         """Получение общего количества видео"""
@@ -212,17 +224,17 @@ class DatabaseManager:
                     rows = await cursor.fetchall()
                     return [dict(row) for row in rows]
 
-# Create a global instance
+# Create global instance
 db_manager = DatabaseManager()
 
-# Maintain the same function interface for backward compatibility
+# Module-level functions
 async def init_db():
     return await db_manager.init_db()
 
 async def add_video(url: str, user_id: int, username: str = None,
                    file_path: str = None, file_id: str = None,
-                   title: str = None):
-    return await db_manager.add_video(url, user_id, username, file_path, file_id, title)
+                   title: str = None, media_type: str = 'video'):
+    return await db_manager.add_video(url, user_id, username, file_path, file_id, title, media_type)
 
 async def get_user_videos(user_id: int):
     return await db_manager.get_user_videos(user_id)
