@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 from telegram import Update, InputMediaPhoto, ReplyKeyboardRemove
@@ -35,23 +36,28 @@ def cleanup_local_file(path: str):
             logger.warning(f"Ошибка при удалении локального файла {path}: {e}")
 
 
+# Регулярное выражение для поиска ссылок TikTok и YouTube в тексте
+URL_REGEX = re.compile(
+    r'https?://(?:www\.|vm\.|vt\.|m\.)?(?:tiktok\.com|youtube\.com|youtu\.be)/[^\s]+',
+    re.IGNORECASE
+)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (ссылок TikTok и YouTube)"""
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
+
+    # Ищем ссылку в тексте сообщения
+    match = URL_REGEX.search(text)
+    if not match:
+        # Если ссылки на TikTok/YouTube нет — бесшумно игнорируем сообщение
+        return
+
+    url = match.group(0)
     user = update.effective_user
     chat_id = update.effective_chat.id
-
-    # Проверка формата ссылки
-    if not downloader.is_supported_url(text):
-        await update.message.reply_text(
-            'ссылку на тт или шорты дай.\n\n',
-            parse_mode='Markdown',
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
 
     # 1. Отправляем статусный статус
     status_message = await context.bot.send_message(
@@ -62,13 +68,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 2. Удаляем исходное сообщение с ссылкой пользователя (если возможно)
     await safe_delete_message(update.message)
 
-    # 3. Проверяем кэш
-    existing_video = await database.get_video_by_url(text)
+    # 3. Проверяем кэш по найденной ссылке
+    existing_video = await database.get_video_by_url(url)
 
     if existing_video:
-        await handle_existing_media(context, chat_id, user, text, existing_video, status_message)
+        await handle_existing_media(context, chat_id, user, url, existing_video, status_message)
     else:
-        await handle_new_media(context, chat_id, user, text, status_message)
+        await handle_new_media(context, chat_id, user, url, status_message)
 
 
 async def handle_new_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user, url: str, status_message):
