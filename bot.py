@@ -57,11 +57,18 @@ def main():
     application.add_handler(InlineQueryHandler(inline_query))
     application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
 
+    bot_mention = filters.Mention("@gruzdtbot")
+    group_filter = (
+            filters.TEXT &
+            ~filters.COMMAND &
+            (bot_mention | filters.REPLY)
+    )
+
     # Регистрация обработчика WebApp
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
+    application.add_handler(MessageHandler(group_filter, handle_message))
 
     # Обработчик текстовых сообщений (ссылки TikTok и YouTube)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(MessageHandler(group_filter, handle_message))
 
     logger.info("Бот запущен!")
     application.run_polling()

@@ -44,6 +44,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = update.effective_chat.id
 
+    # Проверка формата ссылки
+    if not downloader.is_supported_url(text):
+        await update.message.reply_text(
+            'ссылку на тт или шорты дай.\n\n',
+            parse_mode='Markdown',
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
     # 1. Отправляем статусный статус
     status_message = await context.bot.send_message(
         chat_id=chat_id,

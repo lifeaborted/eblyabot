@@ -193,12 +193,6 @@ class MediaDownloader:
 
         clean_url = full_url.split('?')[0]
 
-        if not self.is_supported_url(clean_url):
-            return {
-                'success': False,
-                'error': 'Неподдерживаемая ссылка. Отправьте ссылку на TikTok или YouTube.'
-            }
-
         service = self.get_service_type(clean_url)
 
         # === ПЕРЕХВАТ ТОЛЬКО TIKTOK ФОТО ===

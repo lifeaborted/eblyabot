@@ -23,9 +23,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             f'Привет, {user.first_name}! 👋\n\n'
-            '🎵 Способы использования:\n\n'
-            '1️⃣ Нажми на кнопку для скачивания с сайта\n'
-            '2️⃣ Отправь мне ссылку (TikTok или YouTube) прямо в чат',
+            'способы использования:\n\n'
+            ' - с помощью кнопки через сайт\n'
+            ' - отправить ссылку на тт и шорты в лс\n'
+            ' - добавить в чат с правами админа и тегать со ссылкой',
             reply_markup=ReplyKeyboardRemove()
         )
     except Exception as e:
@@ -41,7 +42,7 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('📭 У тебя пока нет истории скачиваний.')
         return
 
-    lines = ["📋 **Твоя история скачиваний:**"]
+    lines = ["**история скачиваний:**"]
 
     for i, video in enumerate(videos[:10], 1):
         # Оставляем полные названия и ссылки
@@ -80,10 +81,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_videos = await database.get_total_videos()
 
     message = (
-        f'📊 Статистика:\n\n'
-        f'🎥 Твоих скачиваний: {len(user_videos)}\n'
-        f'🌍 Всего скачиваний в боте: {total_videos}\n'
-        f'👤 Твой ID: {user.id}'
+        f'дроч на цифры:\n\n'
+        f' - твоих скачиваний: {len(user_videos)}\n'
+        f' - всего скачиваний в боте: {total_videos}\n'
+        f' - деанон: {user.first_name} (id: {user.id})'
     )
 
     await update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
