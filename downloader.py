@@ -200,7 +200,7 @@ class MediaDownloader:
 
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['web'],
+                    'player_client': ['nweb'],
                 },
                 'tiktok': {
                     'language': 'en',

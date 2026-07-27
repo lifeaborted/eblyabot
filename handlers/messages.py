@@ -45,10 +45,17 @@ URL_REGEX = re.compile(
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (ссылок TikTok и YouTube)"""
-    if not update.message or not update.message.text:
+    if not update.message:
         return
 
-    text = update.message.text.strip()
+    # Берем текст из сообщения ИЛИ из подписи к медиа
+    raw_text = update.message.text or update.message.caption
+    if not raw_text:
+        return
+
+    text = raw_text.strip()
+
+    # ... дальше идет твоя логика проверок ...
 
     # === ЛОГИКА: ПРОВЕРКА ОБРАЩЕНИЯ К БОТУ ===
     chat_type = update.effective_chat.type
