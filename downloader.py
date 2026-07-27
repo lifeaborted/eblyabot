@@ -200,7 +200,8 @@ class MediaDownloader:
 
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['nweb'],
+                    # web работает через curl_cffi + куки, tv работает как страховка
+                    'player_client': ['web', 'tv'],
                 },
                 'tiktok': {
                     'language': 'en',
