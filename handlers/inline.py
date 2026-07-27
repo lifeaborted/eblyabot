@@ -85,18 +85,19 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Если результатов нет (файла нет в кэше или нет file_id), выводим кнопку для старта скачивания
         if not results:
-            results.append(
-                InlineQueryResultArticle(
-                    id=str(uuid.uuid4()),
-                    title="⏳ Скачать медиа",
-                    description="Нажми сюда, чтобы бот скачал это видео прямо в чат",
-                    input_message_content=InputTextMessageContent(
-                        message_text=query
-                    )
+            await update.inline_query.answer(
+                results,
+                cache_time=5,
+                is_personal=True,
+                button=InlineQueryResultsButton(
+                    text="📥 Скачать новое видео",
+                    start_parameter="new_download"  # Этот параметр прилетит в /start
                 )
             )
+            return  # Завершаем функцию, так как ответ уже отправлен
 
-    await update.inline_query.answer(results, cache_time=5, is_personal=True)
+            # Стандартный ответ, если результаты есть
+        await update.inline_query.answer(results, cache_time=5, is_personal=True)
 
 
 async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):

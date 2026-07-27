@@ -10,6 +10,19 @@ logger = logging.getLogger(__name__)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
+
+    # Проверяем, пришел ли пользователь по кнопке из инлайн-режима
+    if context.args and context.args[0] == 'new_download':
+        await update.message.reply_text(
+            f'Привет, {user.first_name}! 🎬\n\n'
+            f'Ты пришел сюда, чтобы скачать новое видео.\n'
+            f'Просто **вставь ссылку** в чат, и я скачаю её для тебя, '
+            f'после чего она станет доступна в твоих инлайн-запросах!',
+            parse_mode='Markdown'
+        )
+        return
+
+    # Стандартная логика старта (если просто написали /start)
     normal_url = f"{SERVER_URL}/?user_id={user.id}&username={user.username or 'unknown'}"
 
     try:
