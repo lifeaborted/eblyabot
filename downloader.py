@@ -162,15 +162,29 @@ class MediaDownloader:
 
     def _get_ydl_opts(self) -> dict:
         from yt_dlp.networking.impersonate import ImpersonateTarget
+        import shutil
 
-        cookie_path = '/etc/secrets/cookies_chrome.txt' if os.path.exists(
-            '/etc/secrets/cookies_chrome.txt') else 'cookies_chrome.txt'
+        # Путь, куда Render кладет секретный файл
+        secret_cookie_path = '/etc/secrets/cookies_chrome.txt'
+        # Рабочий путь внутри нашего контейнера, куда разрешена запись
+        local_cookie_path = os.path.join(self.download_dir, 'cookies_active.txt')
+
+        # Если секретный файл существует — копируем его в доступную для записи зону
+        if os.path.exists(secret_cookie_path):
+            try:
+                shutil.copy(secret_cookie_path, local_cookie_path)
+                cookie_file = local_cookie_path
+            except Exception as e:
+                logger.warning(f"Не удалось скопировать куки из секретной папки: {e}")
+                cookie_file = 'cookies_chrome.txt'
+        else:
+            cookie_file = 'cookies_chrome.txt'
 
         return {
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
 
-            # Указываем динамический путь к кукам
-            'cookiefile': cookie_path,
+            # Передаем путь к копии, доступной для записи
+            'cookiefile': cookie_file,
 
             'quiet': False,
             'no_warnings': False,
