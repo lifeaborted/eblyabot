@@ -163,15 +163,15 @@ class MediaDownloader:
 
     def _get_ydl_opts(self) -> dict:
         return {
-            # Упрощенный и более надежный выбор формата
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            # Убираем жесткие ограничения по расширениям — качаем лучшее качество
+            'format': 'bestvideo+bestaudio/best',
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
             'cookiefile': 'cookies.txt',
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
+            # ffmpeg сам соберет скачанные потоки в финальный mp4 файл
             'merge_output_format': 'mp4',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'headers': {
                 'Referer': 'https://www.tiktok.com/',
                 'Origin': 'https://www.tiktok.com',
@@ -179,8 +179,8 @@ class MediaDownloader:
             'sleep_interval_requests': 1,
             'extractor_args': {
                 'youtube': {
-                    # Убрали skip: ['hls', 'dash'], теперь yt-dlp видит все форматы
-                    'player_client': ['android', 'web'],
+                    # Убираем 'android' и используем более надежные клиенты для обхода блокировок
+                    'player_client': ['tv', 'ios'],
                 },
                 'tiktok': {
                     'language': 'en',
