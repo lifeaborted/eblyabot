@@ -14,10 +14,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверяем, пришел ли пользователь по кнопке из инлайн-режима
     if context.args and context.args[0] == 'new_download':
         await update.message.reply_text(
-            f'Привет, {user.first_name}! 🎬\n\n'
-            f'Ты пришел сюда, чтобы скачать новое видео.\n'
-            f'Просто **вставь ссылку** в чат, и я скачаю её для тебя, '
-            f'после чего она станет доступна в твоих инлайн-запросах!',
+            f'Отправь ссылку в этот чат, чтобы медиа стала доступна черезе @gruzdtbot в любых чатах',
             parse_mode='Markdown'
         )
         return
