@@ -5,8 +5,7 @@ from telegram import (
     Update,
     InlineQueryResultCachedVideo,
     InlineQueryResultCachedPhoto,
-    InlineQueryResultArticle,
-    InputTextMessageContent
+    InlineQueryResultsButton
 )
 from telegram.ext import ContextTypes
 import database
@@ -20,16 +19,15 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     results = []
 
     if not query:
-        # Если запрос пустой, показываем историю скачиваний из базы
+        # Показываем последние скачанные видео из базы
         all_videos = await database.get_all_videos()
 
-        for video in all_videos[:25]:  # Ограничиваем выдачу для скорости
+        for video in all_videos[:25]:
             if not video.get('file_id'):
                 continue
 
             result_id = f"cached_{video['video_id']}_{uuid.uuid4()}"
 
-            # Поддержка фото-каруселей TikTok
             if video.get('media_type') == 'images':
                 try:
                     file_ids = json.loads(video['file_id'])
@@ -37,7 +35,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         results.append(
                             InlineQueryResultCachedPhoto(
                                 id=result_id,
-                                photo_file_id=file_ids[0],  # Превью: первое фото из слайдшоу
+                                photo_file_id=file_ids[0],
                                 title=f"📸 {video.get('title', 'Фото')[:50]}",
                                 description="Слайдшоу из кэша"
                             )
@@ -45,7 +43,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except json.JSONDecodeError:
                     pass
             else:
-                # Поддержка обычных видео
                 results.append(
                     InlineQueryResultCachedVideo(
                         id=result_id,
@@ -54,10 +51,11 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         description=f"{video['created_at']} by {video['username']}"
                     )
                 )
+
     elif 'tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower():
         existing_video = await database.get_video_by_url(query)
 
-        # Проверяем, есть ли кэш И существует ли сохраненный file_id в Telegram
+        # Проверяем кэш
         if existing_video and existing_video.get('file_id'):
             if existing_video.get('media_type') == 'images':
                 try:
@@ -83,21 +81,20 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 )
 
-        # Если результатов нет (файла нет в кэше или нет file_id), выводим кнопку для старта скачивания
-        if not results:
-            await update.inline_query.answer(
-                results,
-                cache_time=5,
-                is_personal=True,
-                button=InlineQueryResultsButton(
-                    text="📥 Скачать новое видео",
-                    start_parameter="new_download"  # Этот параметр прилетит в /start
-                )
-            )
-            return  # Завершаем функцию, так как ответ уже отправлен
+    # Если это ссылка, но ее НЕТ в кэше — прикрепляем верхнюю кнопку перехода в ЛС
+    button_config = None
+    if ('tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower()) and not results:
+        button_config = InlineQueryResultsButton(
+            text="📥 Скачать новое видео в ЛС",
+            start_parameter="new_download"
+        )
 
-            # Стандартный ответ, если результаты есть
-        await update.inline_query.answer(results, cache_time=5, is_personal=True)
+    await update.inline_query.answer(
+        results,
+        cache_time=5,
+        is_personal=True,
+        button=button_config
+    )
 
 
 async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
