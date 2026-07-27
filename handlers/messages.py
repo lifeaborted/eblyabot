@@ -42,6 +42,7 @@ URL_REGEX = re.compile(
     re.IGNORECASE
 )
 
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (ссылок TikTok и YouTube)"""
     if not update.message or not update.message.text:
@@ -49,10 +50,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text.strip()
 
+    # === ЛОГИКА: ПРОВЕРКА ОБРАЩЕНИЯ К БОТУ ===
+    chat_type = update.effective_chat.type
+    bot_user = context.bot
+
+    # 1. Это личные сообщения?
+    is_private = chat_type == 'private'
+
+    # 2. Это реплай (ответ) на сообщение бота?
+    is_reply_to_bot = (
+            update.message.reply_to_message and
+            update.message.reply_to_message.from_user.id == bot_user.id
+    )
+
+    # 3. Есть ли упоминание бота в тексте (с учетом регистра)?
+    is_mentioned = bot_user.username and (f"@{bot_user.username.lower()}" in text.lower())
+
+    # 4. Отправлено ли это через инлайн-режим нашего бота?
+    is_via_bot = update.message.via_bot and update.message.via_bot.id == bot_user.id
+
+    # Если ни одно из условий не выполнено — просто молча игнорируем
+    if not (is_private or is_reply_to_bot or is_mentioned or is_via_bot):
+        return
+    # ===============================================
+
     # Ищем ссылку в тексте сообщения
     match = URL_REGEX.search(text)
     if not match:
-        # Если ссылки на TikTok/YouTube нет — бесшумно игнорируем сообщение
+        # === ВОЗВРАЩАЕМ ОШИБКУ ТОЛЬКО В ЛС ===
+        if is_private:
+            await update.message.reply_text(
+                '🎵 Пожалуйста, отправьте корректную ссылку на TikTok или YouTube.\n\n',
+                parse_mode='Markdown',
+                reply_markup=ReplyKeyboardRemove()
+            )
         return
 
     url = match.group(0)

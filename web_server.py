@@ -48,16 +48,23 @@ async def api_download(request):
         # Проверяем кэш
         existing_video = await database.get_video_by_url(url)
 
-        if existing_video and existing_video.get('file_id'):
-            return web.json_response({
-                'success': True,
-                'title': existing_video.get('title', 'Media Item'),
-                'uploader': existing_video.get('uploader', 'Unknown'),
-                'file_id': existing_video['file_id'],
-                'video_url': existing_video.get('file_path'),
-                'media_type': existing_video.get('media_type', 'video'),
-                'from_cache': True
-            })
+        # === ИСПРАВЛЕННЫЙ БЛОК КЭША ===
+        if existing_video:
+            file_path = existing_video.get('file_path')
+
+            # Проверяем, существует ли файл физически на диске
+            if file_path and os.path.exists(file_path):
+                filename = os.path.basename(file_path)
+                return web.json_response({
+                    'success': True,
+                    'title': existing_video.get('title', 'Media Item'),
+                    'uploader': existing_video.get('uploader', 'Unknown'),
+                    'file_id': existing_video.get('file_id'),
+                    'video_url': f"/videos/{filename}",  # Отдаем фронтенду правильный веб-роут
+                    'media_type': existing_video.get('media_type', 'video'),
+                    'from_cache': True
+                })
+            # Если файла нет на диске (удален ботом), игнорируем кэш и качаем заново
 
         # Скачиваем новое медиа
         result = await downloader.download_media(url)
@@ -71,12 +78,15 @@ async def api_download(request):
         media_type = result.get('media_type', 'video')
         file_path = result.get('file_path') if media_type == 'video' else (result.get('image_paths', [None])[0])
 
+        # Получаем только имя файла для формирования ссылки
+        filename = os.path.basename(file_path) if file_path else None
+
         video_id = await database.add_video(
             url=url,
             user_id=user_id,
             username=username,
             file_path=file_path,
-            file_id=None,
+            file_id=existing_video.get('file_id') if existing_video else None,  # Если был старый file_id, сохраняем его
             title=result['title'],
             media_type=media_type
         )
@@ -85,7 +95,7 @@ async def api_download(request):
             'success': True,
             'title': result['title'],
             'uploader': result.get('uploader', 'Unknown'),
-            'video_url': file_path,
+            'video_url': f"/videos/{filename}" if filename else file_path,  # Отдаем фронтенду правильный веб-роут
             'video_id': video_id,
             'media_type': media_type,
             'from_cache': False

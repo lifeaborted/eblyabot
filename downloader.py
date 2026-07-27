@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_progress_bar(percent: float, length: int = 10) -> str:
-    """Генерация строки прогресс-бара [████░░░░░░] 40.0%"""
+    """Генерация строки прогресс-бара"""
     percent = max(0.0, min(100.0, percent))
     filled = int(round(length * percent / 100))
     bar = '█' * filled + '░' * (length - filled)
@@ -163,8 +163,10 @@ class MediaDownloader:
 
     def _get_ydl_opts(self) -> dict:
         return {
-            'format': 'bestvideo[ext=mp4][filesize<=50M]+bestaudio[ext=m4a]/best[ext=mp4][filesize<=50M]/best[filesize<=50M]/best',
+            # Упрощенный и более надежный выбор формата
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
+            'cookiefile': 'cookies.txt',
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
@@ -177,7 +179,7 @@ class MediaDownloader:
             'sleep_interval_requests': 1,
             'extractor_args': {
                 'youtube': {
-                    'skip': ['hls', 'dash'],
+                    # Убрали skip: ['hls', 'dash'], теперь yt-dlp видит все форматы
                     'player_client': ['android', 'web'],
                 },
                 'tiktok': {
@@ -191,7 +193,13 @@ class MediaDownloader:
         """Универсальное скачивание видео/изображений с TikTok и YouTube с поддержкой прогресс-бара"""
         full_url = await asyncio.to_thread(self._resolve_url, url)
 
-        clean_url = full_url.split('?')[0]
+        # Умная очистка URL
+        if 'youtube.com/watch' in full_url.lower():
+            # Для стандартных видео YouTube оставляем параметр ?v=, но убираем плейлисты (&list=)
+            clean_url = full_url.split('&')[0]
+        else:
+            # Для TikTok, youtu.be и youtube.com/shorts обрезаем все после '?'
+            clean_url = full_url.split('?')[0]
 
         service = self.get_service_type(clean_url)
 
