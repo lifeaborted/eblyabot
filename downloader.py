@@ -166,7 +166,7 @@ class MediaDownloader:
             # Убираем жесткие ограничения по расширениям — качаем лучшее качество
             'format': 'bestvideo+bestaudio/best',
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
-            'cookiefile': 'cookies.txt',
+            #'cookiefile': 'cookies.txt',
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
