@@ -81,20 +81,46 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 )
 
-    # Если это ссылка, но ее НЕТ в кэше — прикрепляем верхнюю кнопку перехода в ЛС
-    button_config = None
-    if ('tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower()) and not results:
-        button_config = InlineQueryResultsButton(
-            text="📥 Скачать новое видео в ЛС",
-            start_parameter="new_download"
-        )
+        # Если это ссылка, но ее НЕТ в кэше
+        button_config = None
+        if (
+                'tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower()) and not results:
 
-    await update.inline_query.answer(
-        results,
-        cache_time=5,
-        is_personal=True,
-        button=button_config
-    )
+            chat_type = update.inline_query.chat_type
+
+            if chat_type == 'private':
+                # 1. Мы в ЛС с другим человеком: тут бот физически не может читать сообщения.
+                # Показываем ТОЛЬКО кнопку редиректа в бота.
+                button_config = InlineQueryResultsButton(
+                    text="📥 Скачать новое видео в ЛС бота",
+                    start_parameter="new_download"
+                )
+            else:
+                # 2. Мы в группе, супергруппе или в ЛС с самим ботом.
+                # Разрешаем выкинуть ссылку текстом, чтобы бот ее поймал.
+                results.append(
+                    InlineQueryResultArticle(
+                        id=str(uuid.uuid4()),
+                        title="⏳ Скачать прямо в этот чат",
+                        description="Бот скачает видео сюда (если он есть в чате)",
+                        input_message_content=InputTextMessageContent(
+                            message_text=query
+                        )
+                    )
+                )
+                # Оставляем кнопку редиректа на всякий случай
+                # (вдруг пользователь вызывает инлайн в группе, где бота еще нет)
+                button_config = InlineQueryResultsButton(
+                    text="📥 Или скачать через ЛС бота",
+                    start_parameter="new_download"
+                )
+
+        await update.inline_query.answer(
+            results,
+            cache_time=5,
+            is_personal=True,
+            button=button_config
+        )
 
 
 async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
