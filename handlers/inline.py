@@ -5,7 +5,9 @@ from telegram import (
     Update,
     InlineQueryResultCachedVideo,
     InlineQueryResultCachedPhoto,
-    InlineQueryResultsButton
+    InlineQueryResultsButton,
+    InlineQueryResultArticle,
+    InputTextMessageContent
 )
 from telegram.ext import ContextTypes
 import database
@@ -81,46 +83,38 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 )
 
-        # Если это ссылка, но ее НЕТ в кэше
-        button_config = None
-        if (
-                'tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower()) and not results:
+    # Логика для НОВЫХ ссылок (которых нет в кэше)
+    button_config = None
+    if ('tiktok.com' in query.lower() or 'youtube.com' in query.lower() or 'youtu.be' in query.lower()) and not results:
 
-            chat_type = update.inline_query.chat_type
+        chat_type = getattr(update.inline_query, 'chat_type', 'sender')
 
-            if chat_type == 'private':
-                # 1. Мы в ЛС с другим человеком: тут бот физически не может читать сообщения.
-                # Показываем ТОЛЬКО кнопку редиректа в бота.
-                button_config = InlineQueryResultsButton(
-                    text="📥 Скачать новое видео в ЛС бота",
-                    start_parameter="new_download"
-                )
-            else:
-                # 2. Мы в группе, супергруппе или в ЛС с самим ботом.
-                # Разрешаем выкинуть ссылку текстом, чтобы бот ее поймал.
-                results.append(
-                    InlineQueryResultArticle(
-                        id=str(uuid.uuid4()),
-                        title="⏳ Скачать прямо в этот чат",
-                        description="Бот скачает видео сюда (если он есть в чате)",
-                        input_message_content=InputTextMessageContent(
-                            message_text=query
-                        )
+        if chat_type == 'private':
+            # В ЛС с другим человеком: только редирект в бота
+            button_config = InlineQueryResultsButton(
+                text="📥 Скачать новое видео в ЛС бота",
+                start_parameter="new_download"
+            )
+        else:
+            # В группах или ЛС с самим ботом: разрешаем скачивать прямо в чат
+            results.append(
+                InlineQueryResultArticle(
+                    id=str(uuid.uuid4()),
+                    title="⏳ Скачать прямо в этот чат",
+                    description="Нажми сюда, чтобы бот начал загрузку",
+                    input_message_content=InputTextMessageContent(
+                        message_text=query
                     )
                 )
-                # Оставляем кнопку редиректа на всякий случай
-                # (вдруг пользователь вызывает инлайн в группе, где бота еще нет)
-                button_config = InlineQueryResultsButton(
-                    text="📥 Или скачать через ЛС бота",
-                    start_parameter="new_download"
-                )
+            )
 
-        await update.inline_query.answer(
-            results,
-            cache_time=5,
-            is_personal=True,
-            button=button_config
-        )
+    # cache_time=0 на время дебага, чтобы Телеграм не запоминал пустые результаты
+    await update.inline_query.answer(
+        results,
+        cache_time=0,
+        is_personal=True,
+        button=button_config
+    )
 
 
 async def chosen_inline_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
