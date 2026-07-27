@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Устанавливаем ffmpeg и Node.js (критично для капчи YouTube)
 RUN apt-get update && \
     apt-get install -y wget tar xz-utils curl ffmpeg && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
