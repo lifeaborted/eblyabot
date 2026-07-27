@@ -160,117 +160,30 @@ class MediaDownloader:
             logger.error(f"Ошибка TikWM API: {e}")
             return {'success': False, 'error': '❌ Ошибка при обращении к TikTok API'}
 
-    def _download_youtube_api(self, url: str, progress_callback=None, loop=None) -> Dict[str, Any]:
-        """Альтернативное скачивание YouTube через зеркала Cobalt (обход блокировок IP)"""
-
-        # Список актуальных зеркал Cobalt, поднятых комьюнити
-        cobalt_instances = [
-            "https://co.wuk.sh/api/json",
-            "https://cobalt.qoid.co/api/json",
-            "https://api.cobalt.tools/api/json"
-        ]
-
-        headers = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        }
-        data = {
-            "url": url,
-            "vQuality": "720"  # Оптимально для лимита в 50 МБ
-        }
-
-        direct_url = None
-
-        # Перебираем зеркала, пока одно из них не отдаст ссылку
-        for api_url in cobalt_instances:
-            try:
-                response = requests.post(api_url, headers=headers, json=data, timeout=15).json()
-
-                # Проверяем успешный ответ
-                if response.get("status") != "error" and response.get("url"):
-                    direct_url = response.get("url")
-                    break  # Ссылка получена, прерываем цикл
-            except Exception as e:
-                logger.warning(f"Зеркало {api_url} не ответило: {e}")
-                continue
-
-        if not direct_url:
-            return {'success': False,
-                    'error': '❌ Все доступные API-серверы перегружены или недоступны. Попробуйте позже.'}
-
-        try:
-            # === Внутренняя логика прогресс-бара ===
-            last_update = [0.0]
-
-            def report_progress(downloaded, total_bytes, start_time):
-                if not (progress_callback and loop): return
-                now = time.time()
-                if now - last_update[0] >= 1.5 or downloaded == total_bytes:
-                    last_update[0] = now
-                    elapsed = now - start_time
-                    speed_bps = downloaded / elapsed if elapsed > 0 else 0
-                    speed_str = f"{speed_bps / 1048576:.2f} MiB/s" if speed_bps > 1048576 else f"{speed_bps / 1024:.2f} KiB/s"
-                    percent = (downloaded / total_bytes * 100) if total_bytes else 0
-                    bar = make_progress_bar(percent)
-                    text = f"🎥 **Скачивание видео...**\n\n`{bar}`\nСкорость: `{speed_str}`"
-                    asyncio.run_coroutine_threadsafe(progress_callback(text), loop)
-
-            # === Скачиваем сам файл ===
-            video_id = url.split('v=')[-1][:11] if 'v=' in url else 'youtube_video'
-            out_path = os.path.join(self.download_dir, f"{video_id}.mp4")
-            start_time = time.time()
-
-            dl_resp = requests.get(direct_url, stream=True, timeout=20)
-            if dl_resp.status_code == 200:
-                total_bytes = int(dl_resp.headers.get('content-length', 0))
-                downloaded_bytes = 0
-
-                with open(out_path, 'wb') as f:
-                    for chunk in dl_resp.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        downloaded_bytes += len(chunk)
-                        report_progress(downloaded_bytes, total_bytes, start_time)
-
-                file_size = os.path.getsize(out_path)
-                if file_size > 50 * 1024 * 1024:
-                    os.remove(out_path)
-                    return {'success': False, 'error': 'Файл слишком большой для отправки в Telegram (более 50 МБ)'}
-
-                return {
-                    'success': True,
-                    'media_type': 'video',
-                    'file_path': out_path,
-                    'title': "YouTube Video",
-                    'uploader': "YouTube",
-                    'duration': 0,
-                    'service': 'youtube'
-                }
-            return {'success': False, 'error': '❌ Ошибка при загрузке видео по готовой ссылке'}
-
-        except Exception as e:
-            logger.error(f"Ошибка скачивания через API: {e}")
-            return {'success': False, 'error': '❌ Ошибка сети при скачивании видео'}
-
-
     def _get_ydl_opts(self) -> dict:
+        # Добавляем импорт нужного класса прямо здесь
+        from yt_dlp.networking.impersonate import ImpersonateTarget
+
         return {
-            # Убираем жесткие ограничения по расширениям — качаем лучшее качество
-            'format': 'bestvideo+bestaudio/best',
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
-            #'cookiefile': 'cookies.txt',
-            'quiet': True,
-            'no_warnings': True,
+            'cookiefile': 'cookies_chrome.txt',
+            'quiet': False,
+            'no_warnings': False,
             'extract_flat': False,
             'merge_output_format': 'mp4',
-            'headers': {
-                'Referer': 'https://www.tiktok.com/',
-                'Origin': 'https://www.tiktok.com',
-            },
             'sleep_interval_requests': 1,
+
+            # Маскируемся под Chrome (исправленный формат для Python API)
+            'impersonate': ImpersonateTarget.from_str('chrome'),
+            'ffmpeg_location': './',
+
+            'js_runtimes': {
+                'node': {}
+            },
+
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv', 'ios'],
+                    'player_client': ['web'],
                 },
                 'tiktok': {
                     'language': 'en',
@@ -280,7 +193,7 @@ class MediaDownloader:
         }
 
     async def download_media(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
-        """Универсальное скачивание видео/изображений с TikTok и YouTube с поддержкой прогресс-бара"""
+        """Универсальное скачивание видео/изображений с TikTok и YouTube с поддержкой прогресс-бар"""
         full_url = await asyncio.to_thread(self._resolve_url, url)
 
         # Умная очистка URL
@@ -296,10 +209,7 @@ class MediaDownloader:
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(self._download_tiktok_api, clean_url, progress_callback, loop)
 
-        if service == 'youtube':
-            loop = asyncio.get_running_loop()
-            return await asyncio.to_thread(self._download_youtube_api, clean_url, progress_callback, loop)
-        # === ЛОГИКА ДЛЯ ОСТАЛЬНЫХ ССЫЛОК (через yt-dlp) ===
+        # === ВСЕ ОСТАЛЬНОЕ (YouTube и TikTok видео) идет через yt-dlp с настройками mweb/ios ===
         opts = self._get_ydl_opts()
         loop = asyncio.get_running_loop()
         last_update = [0.0]
@@ -337,7 +247,6 @@ class MediaDownloader:
                 'success': False,
                 'error': f'Произошла ошибка при скачивании: {str(e)}'
             }
-
 
     def _sync_download(self, url: str, opts: dict, service: str) -> Dict[str, Any]:
         try:
