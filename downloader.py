@@ -160,6 +160,81 @@ class MediaDownloader:
             logger.error(f"Ошибка TikWM API: {e}")
             return {'success': False, 'error': '❌ Ошибка при обращении к TikTok API'}
 
+    def _download_youtube_api(self, url: str, progress_callback=None, loop=None) -> Dict[str, Any]:
+        """Альтернативное скачивание YouTube через бесплатный API (Cobalt) для обхода блокировок IP"""
+        try:
+            api_url = "https://api.cobalt.tools/api/json"
+            headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
+            data = {
+                "url": url,
+                "vQuality": "720"  # 720p оптимально для лимита Telegram в 50 МБ
+            }
+
+            response = requests.post(api_url, headers=headers, json=data, timeout=15).json()
+
+            if response.get("status") == "error":
+                return {'success': False, 'error': f'Cobalt API Error: {response.get("text")}'}
+
+            direct_url = response.get("url")
+            if not direct_url:
+                return {'success': False, 'error': 'API не вернул ссылку на скачивание'}
+
+            # Внутренняя логика прогресс-бара
+            last_update = [0.0]
+
+            def report_progress(downloaded, total_bytes, start_time):
+                if not (progress_callback and loop): return
+                now = time.time()
+                if now - last_update[0] >= 1.5 or downloaded == total_bytes:
+                    last_update[0] = now
+                    elapsed = now - start_time
+                    speed_bps = downloaded / elapsed if elapsed > 0 else 0
+                    speed_str = f"{speed_bps / 1048576:.2f} MiB/s" if speed_bps > 1048576 else f"{speed_bps / 1024:.2f} KiB/s"
+                    percent = (downloaded / total_bytes * 100) if total_bytes else 0
+                    bar = make_progress_bar(percent)
+                    text = f"🎥 **Скачивание видео...**\n\n`{bar}`\nСкорость: `{speed_str}`"
+                    asyncio.run_coroutine_threadsafe(progress_callback(text), loop)
+
+            # Скачиваем файл
+            video_id = url.split('v=')[-1][:11] if 'v=' in url else 'youtube_video'
+            out_path = os.path.join(self.download_dir, f"{video_id}.mp4")
+            start_time = time.time()
+
+            dl_resp = requests.get(direct_url, stream=True, timeout=15)
+            if dl_resp.status_code == 200:
+                total_bytes = int(dl_resp.headers.get('content-length', 0))
+                downloaded_bytes = 0
+
+                with open(out_path, 'wb') as f:
+                    for chunk in dl_resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        report_progress(downloaded_bytes, total_bytes, start_time)
+
+                file_size = os.path.getsize(out_path)
+                if file_size > 50 * 1024 * 1024:
+                    os.remove(out_path)
+                    return {'success': False, 'error': 'Файл слишком большой для отправки в Telegram (более 50 МБ)'}
+
+                return {
+                    'success': True,
+                    'media_type': 'video',
+                    'file_path': out_path,
+                    'title': "YouTube Video",
+                    'uploader': "YouTube",
+                    'duration': 0,
+                    'service': 'youtube'
+                }
+            return {'success': False, 'error': '❌ Ошибка при загрузке видео с API сервера'}
+
+        except Exception as e:
+            logger.error(f"Ошибка YouTube API: {e}")
+            return {'success': False, 'error': '❌ Ошибка при обращении к альтернативному API'}
+
 
     def _get_ydl_opts(self) -> dict:
         return {
@@ -195,24 +270,26 @@ class MediaDownloader:
 
         # Умная очистка URL
         if 'youtube.com/watch' in full_url.lower():
-            # Для стандартных видео YouTube оставляем параметр ?v=, но убираем плейлисты (&list=)
             clean_url = full_url.split('&')[0]
         else:
-            # Для TikTok, youtu.be и youtube.com/shorts обрезаем все после '?'
             clean_url = full_url.split('?')[0]
 
         service = self.get_service_type(clean_url)
 
-        # === ПЕРЕХВАТ ТОЛЬКО TIKTOK ФОТО ===
+        # === ПЕРЕХВАТ TIKTOK ФОТО ===
         if service == 'tiktok' and '/photo/' in clean_url.lower():
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(self._download_tiktok_api, clean_url, progress_callback, loop)
 
-        # === ЛОГИКА ДЛЯ YOUTUBE И TIKTOK ВИДЕО (через yt-dlp) ===
+        # === ПЕРЕХВАТ YOUTUBE ЧЕРЕЗ API (ОБХОД БЛОКИРОВОК RENDER) ===
+        if service == 'youtube':
+            loop = asyncio.get_running_loop()
+            return await asyncio.to_thread(self._download_youtube_api, clean_url, progress_callback, loop)
+
+        # === ЛОГИКА ДЛЯ ОСТАЛЬНЫХ ССЫЛОК (через yt-dlp) ===
         opts = self._get_ydl_opts()
         loop = asyncio.get_running_loop()
         last_update = [0.0]
-
 
         def ytdl_hook(d):
             if d.get('status') == 'downloading':
