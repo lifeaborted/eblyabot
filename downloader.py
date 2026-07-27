@@ -161,29 +161,46 @@ class MediaDownloader:
             return {'success': False, 'error': '❌ Ошибка при обращении к TikTok API'}
 
     def _download_youtube_api(self, url: str, progress_callback=None, loop=None) -> Dict[str, Any]:
-        """Альтернативное скачивание YouTube через бесплатный API (Cobalt) для обхода блокировок IP"""
+        """Альтернативное скачивание YouTube через зеркала Cobalt (обход блокировок IP)"""
+
+        # Список актуальных зеркал Cobalt, поднятых комьюнити
+        cobalt_instances = [
+            "https://co.wuk.sh/api/json",
+            "https://cobalt.qoid.co/api/json",
+            "https://api.cobalt.tools/api/json"
+        ]
+
+        headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        }
+        data = {
+            "url": url,
+            "vQuality": "720"  # Оптимально для лимита в 50 МБ
+        }
+
+        direct_url = None
+
+        # Перебираем зеркала, пока одно из них не отдаст ссылку
+        for api_url in cobalt_instances:
+            try:
+                response = requests.post(api_url, headers=headers, json=data, timeout=15).json()
+
+                # Проверяем успешный ответ
+                if response.get("status") != "error" and response.get("url"):
+                    direct_url = response.get("url")
+                    break  # Ссылка получена, прерываем цикл
+            except Exception as e:
+                logger.warning(f"Зеркало {api_url} не ответило: {e}")
+                continue
+
+        if not direct_url:
+            return {'success': False,
+                    'error': '❌ Все доступные API-серверы перегружены или недоступны. Попробуйте позже.'}
+
         try:
-            api_url = "https://api.cobalt.tools/api/json"
-            headers = {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-            }
-            data = {
-                "url": url,
-                "vQuality": "720"  # 720p оптимально для лимита Telegram в 50 МБ
-            }
-
-            response = requests.post(api_url, headers=headers, json=data, timeout=15).json()
-
-            if response.get("status") == "error":
-                return {'success': False, 'error': f'Cobalt API Error: {response.get("text")}'}
-
-            direct_url = response.get("url")
-            if not direct_url:
-                return {'success': False, 'error': 'API не вернул ссылку на скачивание'}
-
-            # Внутренняя логика прогресс-бара
+            # === Внутренняя логика прогресс-бара ===
             last_update = [0.0]
 
             def report_progress(downloaded, total_bytes, start_time):
@@ -199,12 +216,12 @@ class MediaDownloader:
                     text = f"🎥 **Скачивание видео...**\n\n`{bar}`\nСкорость: `{speed_str}`"
                     asyncio.run_coroutine_threadsafe(progress_callback(text), loop)
 
-            # Скачиваем файл
+            # === Скачиваем сам файл ===
             video_id = url.split('v=')[-1][:11] if 'v=' in url else 'youtube_video'
             out_path = os.path.join(self.download_dir, f"{video_id}.mp4")
             start_time = time.time()
 
-            dl_resp = requests.get(direct_url, stream=True, timeout=15)
+            dl_resp = requests.get(direct_url, stream=True, timeout=20)
             if dl_resp.status_code == 200:
                 total_bytes = int(dl_resp.headers.get('content-length', 0))
                 downloaded_bytes = 0
@@ -229,11 +246,11 @@ class MediaDownloader:
                     'duration': 0,
                     'service': 'youtube'
                 }
-            return {'success': False, 'error': '❌ Ошибка при загрузке видео с API сервера'}
+            return {'success': False, 'error': '❌ Ошибка при загрузке видео по готовой ссылке'}
 
         except Exception as e:
-            logger.error(f"Ошибка YouTube API: {e}")
-            return {'success': False, 'error': '❌ Ошибка при обращении к альтернативному API'}
+            logger.error(f"Ошибка скачивания через API: {e}")
+            return {'success': False, 'error': '❌ Ошибка сети при скачивании видео'}
 
 
     def _get_ydl_opts(self) -> dict:
@@ -245,7 +262,6 @@ class MediaDownloader:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': False,
-            # ffmpeg сам соберет скачанные потоки в финальный mp4 файл
             'merge_output_format': 'mp4',
             'headers': {
                 'Referer': 'https://www.tiktok.com/',
@@ -254,7 +270,6 @@ class MediaDownloader:
             'sleep_interval_requests': 1,
             'extractor_args': {
                 'youtube': {
-                    # Убираем 'android' и используем более надежные клиенты для обхода блокировок
                     'player_client': ['tv', 'ios'],
                 },
                 'tiktok': {
@@ -281,11 +296,9 @@ class MediaDownloader:
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(self._download_tiktok_api, clean_url, progress_callback, loop)
 
-        # === ПЕРЕХВАТ YOUTUBE ЧЕРЕЗ API (ОБХОД БЛОКИРОВОК RENDER) ===
         if service == 'youtube':
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(self._download_youtube_api, clean_url, progress_callback, loop)
-
         # === ЛОГИКА ДЛЯ ОСТАЛЬНЫХ ССЫЛОК (через yt-dlp) ===
         opts = self._get_ydl_opts()
         loop = asyncio.get_running_loop()
