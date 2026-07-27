@@ -1,39 +1,35 @@
-# Use a standard Python 3.11 base image (not AWS Lambda specific)
+# Используем стандартный образ Python 3.11[cite: 4]
 FROM python:3.11-slim
 
-# Install system dependencies including ffmpeg
+# Устанавливаем ffmpeg и Node.js (критично для капчи YouTube)
 RUN apt-get update && \
     apt-get install -y wget tar xz-utils curl ffmpeg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
-# Set working directory
+# Устанавливаем рабочую директорию[cite: 4]
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Копируем зависимости и устанавливаем их[cite: 4]
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Копируем весь остальной код[cite: 4]
 COPY . .
 
-# Create necessary directories
+# Создаем директории и выдаем права[cite: 4]
 RUN mkdir -p downloads downloads_main data
-
-# Set proper permissions
 RUN chmod -R 755 /app/downloads /app/downloads_main /app/data
 
-# Expose port 8080 (Render's default)
+# Открываем порт 8080[cite: 4]
 EXPOSE 8080
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/ || exit 1
-
-# Set environment variables
+# Переменные окружения[cite: 4]
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_DIR=/app/data
 ENV DOWNLOAD_DIR=/app/downloads
 
-# Run the application
+# Запуск[cite: 4]
 CMD ["python", "-u", "bot.py"]

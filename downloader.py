@@ -161,21 +161,24 @@ class MediaDownloader:
             return {'success': False, 'error': '❌ Ошибка при обращении к TikTok API'}
 
     def _get_ydl_opts(self) -> dict:
-        # Добавляем импорт нужного класса прямо здесь
         from yt_dlp.networking.impersonate import ImpersonateTarget
+
+        cookie_path = '/etc/secrets/cookies_chrome.txt' if os.path.exists(
+            '/etc/secrets/cookies_chrome.txt') else 'cookies_chrome.txt'
 
         return {
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
-            'cookiefile': 'cookies_chrome.txt',
+
+            # Указываем динамический путь к кукам
+            'cookiefile': cookie_path,
+
             'quiet': False,
             'no_warnings': False,
             'extract_flat': False,
             'merge_output_format': 'mp4',
             'sleep_interval_requests': 1,
 
-            # Маскируемся под Chrome (исправленный формат для Python API)
             'impersonate': ImpersonateTarget.from_str('chrome'),
-            'ffmpeg_location': './',
 
             'js_runtimes': {
                 'node': {}
@@ -191,7 +194,6 @@ class MediaDownloader:
                 },
             }
         }
-
     async def download_media(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """Универсальное скачивание видео/изображений с TikTok и YouTube с поддержкой прогресс-бар"""
         full_url = await asyncio.to_thread(self._resolve_url, url)
