@@ -29,7 +29,7 @@ COPY . .
 # Создаем директории, выдаем права и делаем скрипт исполняемым
 RUN mkdir -p downloads downloads_main data
 RUN chmod -R 755 /app/downloads /app/downloads_main /app/data
-RUN chmod +x start.sh
+RUN chmod +x build.sh
 
 # Открываем порт 8080
 EXPOSE 8080
