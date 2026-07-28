@@ -180,11 +180,12 @@ class MediaDownloader:
         else:
             cookie_file = 'cookies_chrome.txt'
 
+
         return {
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
 
             # Передаем путь к копии, доступной для записи
-            'cookiefile': cookie_file,
+            #'cookiefile': cookie_file,
 
             'quiet': False,
             'no_warnings': False,
