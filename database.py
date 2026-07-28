@@ -29,7 +29,7 @@ class DatabaseManager:
         else:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 await self._create_sqlite_tables(db)
-    
+
     async def _create_sqlite_tables(self, db):
         """Create tables for SQLite database"""
         await db.execute('''
@@ -45,15 +45,22 @@ class DatabaseManager:
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS app_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+
         await db.commit()
 
-        # Check column migration for media_type
         try:
             await db.execute('ALTER TABLE videos ADD COLUMN media_type TEXT DEFAULT "video"')
             await db.commit()
         except Exception:
-            pass # Column already exists
-        
+            pass
+
     async def _create_postgres_tables(self, conn):
         """Create tables for PostgreSQL database"""
         await conn.execute('''
@@ -69,7 +76,14 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # Postgres migration check
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS app_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+
         try:
             await conn.execute('ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_type TEXT DEFAULT \'video\'')
         except Exception as e:
@@ -224,6 +238,33 @@ class DatabaseManager:
                     rows = await cursor.fetchall()
                     return [dict(row) for row in rows]
 
+    async def get_state(self, key: str) -> Optional[str]:
+        """Получает значение состояния по ключу"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchval('SELECT value FROM app_state WHERE key = $1', key)
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                async with db.execute('SELECT value FROM app_state WHERE key = ?', (key,)) as cursor:
+                    res = await cursor.fetchone()
+                    return res[0] if res else None
+
+    async def set_state(self, key: str, value: str):
+        """Сохраняет или обновляет значение состояния"""
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                await conn.execute('''
+                    INSERT INTO app_state (key, value) VALUES ($1, $2) 
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                ''', key, value)
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                await db.execute(
+                    'INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)',
+                    (key, value)
+                )
+                await db.commit()
+
 # Create global instance
 db_manager = DatabaseManager()
 
@@ -256,3 +297,9 @@ async def check_url_exists(url: str):
 
 async def get_all_videos():
     return await db_manager.get_all_videos()
+
+async def get_state(key: str):
+    return await db_manager.get_state(key)
+
+async def set_state(key: str, value: str):
+    return await db_manager.set_state(key, value)

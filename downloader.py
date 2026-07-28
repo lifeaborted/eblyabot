@@ -4,6 +4,7 @@ import time
 import logging
 import asyncio
 import requests
+import database
 import yt_dlp
 from typing import Dict, Any, List, Callable, Optional
 from config import DOWNLOAD_DIR
@@ -161,46 +162,24 @@ class MediaDownloader:
             return {'success': False, 'error': '❌ Ошибка при обращении к TikTok API'}
 
     def _get_ydl_opts(self) -> dict:
-        from yt_dlp.networking.impersonate import ImpersonateTarget
-        import shutil
-
-        # Путь, куда Render кладет секретный файл
-        secret_cookie_path = '/etc/secrets/cookies_chrome.txt'
-        # Рабочий путь внутри нашего контейнера, куда разрешена запись
-        local_cookie_path = os.path.join(self.download_dir, 'cookies_active.txt')
-
-        # Если секретный файл существует — копируем его в доступную для записи зону
-        if os.path.exists(secret_cookie_path):
-            try:
-                shutil.copy(secret_cookie_path, local_cookie_path)
-                cookie_file = local_cookie_path
-            except Exception as e:
-                logger.warning(f"Не удалось скопировать куки из секретной папки: {e}")
-                cookie_file = 'cookies_chrome.txt'
-        else:
-            cookie_file = 'cookies_chrome.txt'
+        # Настраиваем папку кэша внутри нашей папки downloads
+        cache_dir = os.path.join(self.download_dir, 'yt-dlp-cache')
+        os.makedirs(cache_dir, exist_ok=True)
 
         return {
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
+            'cachedir': cache_dir,
 
-            # Передаем путь к копии, доступной для записи
-            'cookiefile': cookie_file,
+            # === ВКЛЮЧАЕМ OAUTH2 ===
+            'username': 'oauth2',
 
             'quiet': False,
             'no_warnings': False,
             'extract_flat': False,
             'merge_output_format': 'mp4',
             'sleep_interval_requests': 1,
-
-            'impersonate': ImpersonateTarget.from_str('chrome'),
-
-            'js_runtimes': {
-                'node': {}
-            },
-
             'extractor_args': {
                 'youtube': {
-                    # web работает через curl_cffi + куки, tv работает как страховка
                     'player_client': ['web', 'tv'],
                 },
                 'tiktok': {
@@ -209,6 +188,7 @@ class MediaDownloader:
                 },
             }
         }
+
     async def download_media(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         """Универсальное скачивание видео/изображений с TikTok и YouTube с поддержкой прогресс-бар"""
         full_url = await asyncio.to_thread(self._resolve_url, url)
@@ -226,10 +206,24 @@ class MediaDownloader:
             loop = asyncio.get_running_loop()
             return await asyncio.to_thread(self._download_tiktok_api, clean_url, progress_callback, loop)
 
-        # === ВСЕ ОСТАЛЬНОЕ (YouTube и TikTok видео) идет через yt-dlp с настройками mweb/ios ===
+        # === ВСЕ ОСТАЛЬНОЕ (YouTube и TikTok видео) идет через yt-dlp ===
         opts = self._get_ydl_opts()
         loop = asyncio.get_running_loop()
         last_update = [0.0]
+
+        # Определяем пути к кэшу и токену
+        cache_dir = opts.get('cachedir')
+        token_file = os.path.join(cache_dir, 'youtube', 'oauth2_token.json')
+
+        # 1. ВОССТАНАВЛИВАЕМ ТОКЕН ИЗ БД (до запуска yt-dlp)
+        try:
+            saved_token = await database.get_state('youtube_oauth2_token')
+            if saved_token:
+                os.makedirs(os.path.dirname(token_file), exist_ok=True)
+                with open(token_file, 'w', encoding='utf-8') as f:
+                    f.write(saved_token)
+        except Exception as e:
+            logger.error(f"Ошибка загрузки токена из БД: {e}")
 
         def ytdl_hook(d):
             if d.get('status') == 'downloading':
@@ -256,8 +250,20 @@ class MediaDownloader:
         opts['progress_hooks'] = [ytdl_hook]
 
         try:
-            # Передаем очищенный clean_url в _sync_download
-            return await asyncio.to_thread(self._sync_download, clean_url, opts, service)
+            # Запускаем скачивание в отдельном потоке
+            result = await asyncio.to_thread(self._sync_download, clean_url, opts, service)
+
+            # 2. СОХРАНЯЕМ ОБНОВЛЕННЫЙ ТОКЕН В БД (после работы yt-dlp)
+            if os.path.exists(token_file):
+                try:
+                    with open(token_file, 'r', encoding='utf-8') as f:
+                        new_token = f.read()
+                        await database.set_state('youtube_oauth2_token', new_token)
+                except Exception as e:
+                    logger.error(f"Ошибка сохранения токена в БД: {e}")
+
+            return result
+
         except Exception as e:
             logger.error(f"Ошибка скачивания медиа: {e}", exc_info=True)
             return {
