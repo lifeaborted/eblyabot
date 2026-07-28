@@ -188,6 +188,7 @@ class MediaDownloader:
             #'cookiefile': cookie_file,
 
             'quiet': False,
+            'proxy': 'socks5://127.0.0.1:1080',
             'no_warnings': False,
             'extract_flat': False,
             'merge_output_format': 'mp4',
