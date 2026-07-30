@@ -55,8 +55,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = raw_text.strip()
 
-    # ... дальше идет твоя логика проверок ...
-
     # === ЛОГИКА: ПРОВЕРКА ОБРАЩЕНИЯ К БОТУ ===
     chat_type = update.effective_chat.type
     bot_user = context.bot
@@ -143,6 +141,9 @@ async def handle_new_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, use
         media_type = result.get('media_type', 'video')
         title = result.get('title', 'Media')
 
+        # Обрезаем заголовок до безопасной длины для Telegram
+        safe_title = (title[:1000] + '...') if len(title) > 1000 else title
+
         if media_type == 'images':
             # === ОБРАБОТКА ИЗОБРАЖЕНИЙ (СЛАЙДШОУ) ===
             await status_message.edit_text('📤 Отправляю фотослайдшоу...')
@@ -168,8 +169,7 @@ async def handle_new_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, use
                     for idx, img_path in enumerate(chunk):
                         f = open(img_path, 'rb')
                         opened_files.append(f)
-                        # Подпись добавляется только к первому фото ПОСЛЕДНЕГО чанка
-                        caption = f"🎵 {title}" if (chunk_idx == total_chunks - 1 and idx == 0) else None
+                        caption = f"🎵 {safe_title}" if (chunk_idx == total_chunks - 1 and idx == 0) else None
                         media_group.append(InputMediaPhoto(media=f, caption=caption))
 
                     sent_msgs = await context.bot.send_media_group(
@@ -224,7 +224,7 @@ async def handle_new_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, use
                 sent_message = await context.bot.send_video(
                     chat_id=chat_id,
                     video=video_file,
-                    caption=f"🎵 {title}",
+                    caption=f"🎵 {safe_title}",
                     supports_streaming=True,
                     read_timeout=60,
                     write_timeout=60
@@ -264,6 +264,9 @@ async def handle_existing_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int
         title = media_data.get('title', 'Media Item')
         file_id = media_data.get('file_id')
 
+        # Обрезаем заголовок до безопасной длины для Telegram
+        safe_title = (title[:1000] + '...') if len(title) > 1000 else title
+
         if media_type == 'images':
             if file_id:
                 try:
@@ -271,7 +274,7 @@ async def handle_existing_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int
                     for chunk_idx, chunk in enumerate(chunk_list(file_ids, 10)):
                         media_group = []
                         for idx, fid in enumerate(chunk):
-                            caption = f"🎵 {title}" if (chunk_idx == 0 and idx == 0) else None
+                            caption = f"🎵 {safe_title}" if (chunk_idx == 0 and idx == 0) else None
                             media_group.append(InputMediaPhoto(media=fid, caption=caption))
                         await context.bot.send_media_group(chat_id=chat_id, media=media_group)
 
@@ -287,7 +290,7 @@ async def handle_existing_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int
                     await context.bot.send_video(
                         chat_id=chat_id,
                         video=file_id,
-                        caption=f"🎵 {title}",
+                        caption=f"🎵 {safe_title}",
                         supports_streaming=True
                     )
                     await database.update_video_file_id(url, file_id)
@@ -303,7 +306,7 @@ async def handle_existing_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int
                     sent_message = await context.bot.send_video(
                         chat_id=chat_id,
                         video=video_file,
-                        caption=f"🎵 {title}",
+                        caption=f"🎵 {safe_title}",
                         supports_streaming=True
                     )
 
