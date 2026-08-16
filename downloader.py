@@ -57,10 +57,23 @@ class MediaDownloader:
         """Альтернативное скачивание TikTok через бесплатный API (с логированием в чат)"""
         try:
             api_url = "https://www.tikwm.com/api/"
-            response = requests.post(api_url, data={"url": url, "hd": 1}, timeout=15).json()
+
+            # 1. Делаем запрос, но пока НЕ вызываем .json()
+            raw_response = requests.post(api_url, data={"url": url, "hd": 1}, timeout=15)
+
+            # 2. Пытаемся безопасно распарсить ответ
+            try:
+                response = raw_response.json()
+            except Exception as e:
+                # Если сервер вернул HTML (например, 502 Bad Gateway или капчу)
+                logger.error(
+                    f"TikWM вернул не JSON. Статус: {raw_response.status_code}. Ответ: {raw_response.text[:150]}")
+                return {'success': False,
+                        'error': '❌ Сервер загрузки TikTok временно перегружен или недоступен. Попробуйте еще раз через пару минут.'}
 
             if response.get("code") != 0:
-                return {'success': False, 'error': 'API не смог обработать ссылку TikTok'}
+                error_msg = response.get("msg", "API не смог обработать ссылку")
+                return {'success': False, 'error': f'❌ Ошибка API: {error_msg}'}
 
             info = response["data"]
             title = info.get("title", "TikTok Media")
