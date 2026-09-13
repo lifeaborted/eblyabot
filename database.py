@@ -4,23 +4,24 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from config import DATABASE_NAME, DATABASE_URL, DB_TYPE
 import logging
-logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 
 if DB_TYPE == 'postgresql':
     import asyncpg
+
     HAS_ASPG = True
 else:
     import aiosqlite
-    HAS_ASPG = False
 
+    HAS_ASPG = False
 
 
 class DatabaseManager:
     def __init__(self):
         self.db_type = DB_TYPE
         self.pool = None
-        
+
     async def init_db(self):
         """Initialize database connection and create tables"""
         if self.db_type == 'postgresql' and DATABASE_URL:
@@ -46,14 +47,20 @@ class DatabaseManager:
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        await db.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                forward_chats TEXT
+            )
+        ''')
         await db.commit()
 
-        # Check column migration for media_type
         try:
             await db.execute('ALTER TABLE videos ADD COLUMN media_type TEXT DEFAULT "video"')
             await db.commit()
         except Exception:
-            pass # Column already exists
+            pass
 
     async def _create_postgres_tables(self, conn):
         """Create tables for PostgreSQL database"""
@@ -70,16 +77,22 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # Postgres migration check
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id BIGINT PRIMARY KEY,
+                forward_chats TEXT
+            )
+        ''')
+
         try:
             await conn.execute('ALTER TABLE videos ADD COLUMN IF NOT EXISTS media_type TEXT DEFAULT \'video\'')
         except Exception as e:
             logger.debug(f"Postgres column check: {e}")
-    
+
     async def add_video(self, url: str, user_id: int, username: str = None,
-                       file_path: str = None, file_id: str = None,
-                       title: str = None, media_type: str = 'video'):
-        """Добавление нового видео или группы фото в базу данных"""
+                        file_path: str = None, file_id: str = None,
+                        title: str = None, media_type: str = 'video'):
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 result = await conn.fetchval(
@@ -104,7 +117,6 @@ class DatabaseManager:
                 return cursor.lastrowid
 
     async def get_user_videos(self, user_id: int) -> List[Dict[str, Any]]:
-        """Получение всех видео пользователя"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 rows = await conn.fetch(
@@ -116,14 +128,13 @@ class DatabaseManager:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
-                    'SELECT * FROM videos WHERE user_id = ? ORDER BY created_at DESC',
-                    (user_id,)
+                        'SELECT * FROM videos WHERE user_id = ? ORDER BY created_at DESC',
+                        (user_id,)
                 ) as cursor:
                     rows = await cursor.fetchall()
                     return [dict(row) for row in rows]
 
     async def get_video_by_id(self, video_id: int) -> Optional[Dict[str, Any]]:
-        """Получение видео по ID"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -135,14 +146,13 @@ class DatabaseManager:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
-                    'SELECT * FROM videos WHERE video_id = ?',
-                    (video_id,)
+                        'SELECT * FROM videos WHERE video_id = ?',
+                        (video_id,)
                 ) as cursor:
                     row = await cursor.fetchone()
                     return dict(row) if row else None
 
     async def get_video_by_url(self, url: str) -> Optional[Dict[str, Any]]:
-        """Получение видео по URL"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
@@ -154,14 +164,13 @@ class DatabaseManager:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
-                    'SELECT * FROM videos WHERE url = ?',
-                    (url,)
+                        'SELECT * FROM videos WHERE url = ?',
+                        (url,)
                 ) as cursor:
                     row = await cursor.fetchone()
                     return dict(row) if row else None
 
     async def update_video_file_id(self, url: str, file_id: str):
-        """Обновление file_id для видео (для переиспользования в Telegram)"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 await conn.execute(
@@ -175,11 +184,10 @@ class DatabaseManager:
                     (file_id, datetime.now().replace(microsecond=0), url)
                 )
                 await db.commit()
-        
+
         logger.info(f"Обновлен file_id в БД для URL: {url}")
 
     async def get_total_videos(self) -> int:
-        """Получение общего количества видео"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 result = await conn.fetchval('SELECT COUNT(*) FROM videos')
@@ -191,7 +199,6 @@ class DatabaseManager:
                     return result[0]
 
     async def check_url_exists(self, url: str) -> bool:
-        """Проверка существования URL в базе"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 result = await conn.fetchval(
@@ -202,14 +209,13 @@ class DatabaseManager:
         else:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 async with db.execute(
-                    'SELECT video_id FROM videos WHERE url = ?',
-                    (url,)
+                        'SELECT video_id FROM videos WHERE url = ?',
+                        (url,)
                 ) as cursor:
                     result = await cursor.fetchone()
                     return result is not None
 
     async def get_all_videos(self) -> List[Dict[str, Any]]:
-        """Получение всех видео"""
         if self.db_type == 'postgresql' and self.pool:
             async with self.pool.acquire() as conn:
                 rows = await conn.fetch(
@@ -220,40 +226,90 @@ class DatabaseManager:
             async with aiosqlite.connect(DATABASE_NAME) as db:
                 db.row_factory = aiosqlite.Row
                 async with db.execute(
-                    'SELECT * FROM videos ORDER BY created_at DESC'
+                        'SELECT * FROM videos ORDER BY created_at DESC'
                 ) as cursor:
                     rows = await cursor.fetchall()
                     return [dict(row) for row in rows]
 
-# Create global instance
+    async def set_user_forward_chats(self, user_id: int, chats: str):
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                await conn.execute(
+                    '''INSERT INTO user_settings (user_id, forward_chats)
+                       VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET forward_chats = EXCLUDED.forward_chats''',
+                    user_id, chats
+                )
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                await db.execute(
+                    '''INSERT INTO user_settings (user_id, forward_chats)
+                       VALUES (?, ?)
+                       ON CONFLICT(user_id) DO UPDATE SET forward_chats=excluded.forward_chats''',
+                    (user_id, chats)
+                )
+                await db.commit()
+
+    async def get_user_forward_chats(self, user_id: int) -> list:
+        if self.db_type == 'postgresql' and self.pool:
+            async with self.pool.acquire() as conn:
+                result = await conn.fetchval('SELECT forward_chats FROM user_settings WHERE user_id = $1', user_id)
+                if result:
+                    return [int(x.strip()) for x in result.split(',') if x.strip()]
+        else:
+            async with aiosqlite.connect(DATABASE_NAME) as db:
+                async with db.execute('SELECT forward_chats FROM user_settings WHERE user_id = ?',
+                                      (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row and row[0]:
+                        return [int(x.strip()) for x in row[0].split(',') if x.strip()]
+        return []
+
+
 db_manager = DatabaseManager()
 
-# Module-level functions
+
 async def init_db():
     return await db_manager.init_db()
 
+
 async def add_video(url: str, user_id: int, username: str = None,
-                   file_path: str = None, file_id: str = None,
-                   title: str = None, media_type: str = 'video'):
+                    file_path: str = None, file_id: str = None,
+                    title: str = None, media_type: str = 'video'):
     return await db_manager.add_video(url, user_id, username, file_path, file_id, title, media_type)
+
 
 async def get_user_videos(user_id: int):
     return await db_manager.get_user_videos(user_id)
 
+
 async def get_video_by_id(video_id: int):
     return await db_manager.get_video_by_id(video_id)
+
 
 async def get_video_by_url(url: str):
     return await db_manager.get_video_by_url(url)
 
+
 async def update_video_file_id(url: str, file_id: str):
     return await db_manager.update_video_file_id(url, file_id)
+
 
 async def get_total_videos():
     return await db_manager.get_total_videos()
 
+
 async def check_url_exists(url: str):
     return await db_manager.check_url_exists(url)
 
+
 async def get_all_videos():
     return await db_manager.get_all_videos()
+
+
+async def set_user_forward_chats(user_id: int, chats: str):
+    return await db_manager.set_user_forward_chats(user_id, chats)
+
+
+async def get_user_forward_chats(user_id: int) -> list:
+    return await db_manager.get_user_forward_chats(user_id)

@@ -89,9 +89,10 @@ async def handle_message(message: Message, bot: Bot):
         return await status_msg.edit_text(f"Не удалось скачать файл: {error_text}", parse_mode=None)
 
     media_type = result.get('media_type', 'video')
+    uploader_name = result.get('uploader', 'Unknown')
 
     safe_caption = format_caption(
-        result.get('uploader', 'Unknown'),
+        uploader_name,
         result.get('title', ''),
         result.get('description', ''),
         result.get('tags', [])
@@ -108,6 +109,7 @@ async def handle_message(message: Message, bot: Bot):
             logger.info(f"[USER: {user_id}] Отправляю фото-карусель (картинок: {len(result['image_paths'])})...")
             await status_msg.edit_text('Отправляю слайдшоу...')
             saved_file_ids = []
+            audio_file_id = None
 
             for chunk_idx, chunk in enumerate(chunk_list(result['image_paths'], 10)):
                 media_group = []
@@ -115,51 +117,89 @@ async def handle_message(message: Message, bot: Bot):
                     caption = safe_caption if (chunk_idx == 0 and idx == 0) else None
                     media_group.append(InputMediaPhoto(type='photo', media=FSInputFile(img_path), caption=caption))
 
-                # === УМНАЯ ОТПРАВКА С ИСКЛЮЧЕНИЕМ БИТЫХ ФОТО ===
                 current_group = list(media_group)
                 while current_group:
                     try:
                         msgs = await bot.send_media_group(message.chat.id, media=current_group)
                         saved_file_ids.extend([m.photo[-1].file_id for m in msgs if m.photo])
-                        break  # Успех, выходим из цикла
+                        break
                     except Exception as e:
                         err_str = str(e)
                         match = re.search(r'failed to send message #(\d+)', err_str)
                         if match and "IMAGE_PROCESS_FAILED" in err_str:
                             bad_idx = int(match.group(1)) - 1
                             if 0 <= bad_idx < len(current_group):
-                                logger.warning(f"Удаляю битое фото (индекс {bad_idx}) из пачки {chunk_idx}")
+                                logger.warning(f"Удаляю битое фото (индекс {bad_idx})")
                                 current_group.pop(bad_idx)
-                                # Если после удаления осталась 1 картинка, send_media_group выдаст ошибку
                                 if len(current_group) == 1:
                                     item = current_group[0]
                                     msg = await bot.send_photo(message.chat.id, photo=item.media, caption=item.caption)
                                     saved_file_ids.append(msg.photo[-1].file_id)
                                     break
-                                continue  # Пробуем отправить карусель заново без битого фото
-
-                        logger.error(f"[USER: {user_id}] Критическая ошибка отправки карусели {chunk_idx}: {e}")
+                                continue
                         break
 
             if result.get('audio_path') and os.path.exists(result['audio_path']):
                 try:
                     logger.info(f"[USER: {user_id}] Отправляю аудиодорожку...")
-                    await message.answer_audio(audio=FSInputFile(result['audio_path']), caption="Оригинальный звук")
+                    audio_msg = await message.answer_audio(
+                        audio=FSInputFile(result['audio_path']),
+                        caption="Оригинальный звук",
+                        title="Оригинальный звук",
+                        performer=uploader_name
+                    )
+                    audio_file_id = audio_msg.audio.file_id
                 except Exception as e:
                     logger.error(f"[USER: {user_id}] Ошибка отправки аудио: {e}")
 
-            if saved_file_ids:
+            forward_chats = await database.get_user_forward_chats(user_id)
+            if forward_chats and (saved_file_ids or audio_file_id):
+                for f_chat in forward_chats:
+                    if f_chat == message.chat.id: continue
+                    try:
+                        if saved_file_ids:
+                            for chunk_idx, chunk in enumerate(chunk_list(saved_file_ids, 10)):
+                                mg = []
+                                for idx, fid in enumerate(chunk):
+                                    cap = safe_caption if (chunk_idx == 0 and idx == 0) else None
+                                    mg.append(InputMediaPhoto(type='photo', media=fid, caption=cap))
+
+                                if len(mg) == 1:
+                                    await bot.send_photo(f_chat, photo=mg[0].media, caption=mg[0].caption)
+                                else:
+                                    await bot.send_media_group(f_chat, media=mg)
+                        if audio_file_id:
+                            await bot.send_audio(f_chat, audio=audio_file_id, caption="Оригинальный звук",
+                                                 title="Оригинальный звук", performer=uploader_name)
+                    except Exception as e:
+                        logger.error(f"[USER: {user_id}] Ошибка пересылки слайдшоу в {f_chat}: {e}")
+                        await message.answer(
+                            f"Не удалось переслать контент в чат {f_chat}. Убедитесь, что бот имеет права на отправку сообщений.")
+
+            if saved_file_ids or audio_file_id:
+                cache_data = {"photos": saved_file_ids, "audio": audio_file_id}
                 await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
-                                         file_path=result['image_paths'][0] if result['image_paths'] else None,
-                                         file_id=json.dumps(saved_file_ids), title=safe_caption, media_type='images')
-                logger.info(f"[USER: {user_id}] Слайдшоу успешно отправлено и занесено в БД.")
+                                         file_path=result['image_paths'][0] if result.get('image_paths') else None,
+                                         file_id=json.dumps(cache_data), title=safe_caption, media_type='images')
+                logger.info(f"[USER: {user_id}] Слайдшоу и аудио успешно сохранены в БД.")
         else:
             logger.info(f"[USER: {user_id}] Отправляю видеофайл...")
             await status_msg.edit_text('Отправляю видео...')
             sent = await message.answer_video(video=FSInputFile(result['file_path']), caption=safe_caption)
+            video_file_id = sent.video.file_id
+
+            forward_chats = await database.get_user_forward_chats(user_id)
+            if forward_chats:
+                for f_chat in forward_chats:
+                    if f_chat == message.chat.id: continue
+                    try:
+                        await bot.send_video(f_chat, video=video_file_id, caption=safe_caption)
+                    except Exception as e:
+                        logger.error(f"[USER: {user_id}] Ошибка пересылки видео в {f_chat}: {e}")
+                        await message.answer(f"Не удалось переслать видео в чат {f_chat}.")
 
             await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
-                                     file_path=result['file_path'], file_id=sent.video.file_id,
+                                     file_path=result['file_path'], file_id=video_file_id,
                                      title=safe_caption, media_type='video')
             logger.info(f"[USER: {user_id}] Видео успешно отправлено и занесено в БД.")
 
@@ -171,33 +211,69 @@ async def send_from_cache(message: Message, bot: Bot, url: str, media_data: dict
     safe_caption = media_data.get('title', 'Медиа')
     file_id = media_data.get('file_id')
 
+    forward_chats = await database.get_user_forward_chats(user_id)
+    target_chats = [message.chat.id] + [c for c in forward_chats if c != message.chat.id]
+
     try:
         if media_data.get('media_type') == 'images' and file_id:
             logger.info(f"[USER: {user_id}] Выгрузка слайдшоу по File ID...")
-            file_ids = json.loads(file_id) if file_id.startswith('[') else [file_id]
-            for chunk_idx, chunk in enumerate(chunk_list(file_ids, 10)):
-                media_group = [InputMediaPhoto(type='photo', media=fid,
-                                               caption=safe_caption if (chunk_idx == 0 and idx == 0) else None) for
-                               idx, fid in enumerate(chunk)]
 
-                # Защита для кэша (если в пачке остался 1 элемент)
-                if len(media_group) == 1:
-                    await bot.send_photo(message.chat.id, photo=media_group[0].media, caption=media_group[0].caption)
+            try:
+                parsed_data = json.loads(file_id)
+                if isinstance(parsed_data, dict):
+                    photo_ids = parsed_data.get("photos", [])
+                    audio_id = parsed_data.get("audio")
+                elif isinstance(parsed_data, list):
+                    photo_ids = parsed_data
+                    audio_id = None
                 else:
-                    await bot.send_media_group(message.chat.id, media=media_group)
+                    photo_ids = [file_id]
+                    audio_id = None
+            except json.JSONDecodeError:
+                photo_ids = [file_id]
+                audio_id = None
 
-            logger.info(f"[USER: {user_id}] Слайдшоу из кэша отправлено.")
+            for chat_id in target_chats:
+                try:
+                    if photo_ids:
+                        for chunk_idx, chunk in enumerate(chunk_list(photo_ids, 10)):
+                            media_group = [InputMediaPhoto(type='photo', media=fid, caption=safe_caption if (
+                                        chunk_idx == 0 and idx == 0) else None) for idx, fid in enumerate(chunk)]
+                            if len(media_group) == 1:
+                                await bot.send_photo(chat_id, photo=media_group[0].media,
+                                                     caption=media_group[0].caption)
+                            else:
+                                await bot.send_media_group(chat_id, media=media_group)
+
+                    if audio_id:
+                        await bot.send_audio(chat_id, audio=audio_id, caption="Оригинальный звук")
+                except Exception as e:
+                    if chat_id != message.chat.id:
+                        await message.answer(f"Ошибка пересылки контента в чат {chat_id}.")
+                    else:
+                        raise e
+
+            logger.info(f"[USER: {user_id}] Слайдшоу из кэша отправлено всем получателям.")
+            await status_msg.delete()
 
         elif file_id:
             logger.info(f"[USER: {user_id}] Выгрузка видео по File ID: {file_id}")
-            await message.answer_video(video=file_id, caption=safe_caption)
+            for chat_id in target_chats:
+                try:
+                    await bot.send_video(chat_id, video=file_id, caption=safe_caption)
+                except Exception as e:
+                    if chat_id != message.chat.id:
+                        await message.answer(f"Ошибка пересылки контента в чат {chat_id}.")
+                    else:
+                        raise e
+
             await database.update_video_file_id(url, file_id)
-            logger.info(f"[USER: {user_id}] Видео из кэша отправлено.")
+            logger.info(f"[USER: {user_id}] Видео из кэша отправлено всем получателям.")
+            await status_msg.delete()
         else:
             logger.warning(f"[USER: {user_id}] Запись в кэше есть, но File ID отсутствует!")
             return await status_msg.edit_text('Файл не найден. Пожалуйста, отправьте ссылку еще раз.')
 
-        await status_msg.delete()
     except Exception as e:
         logger.error(f"[USER: {user_id}] Ошибка отправки из кэша: {e}")
         await status_msg.edit_text('Произошла ошибка при выгрузке из кэша. Пожалуйста, отправьте ссылку еще раз.')

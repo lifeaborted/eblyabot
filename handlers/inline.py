@@ -26,11 +26,21 @@ async def inline_query_handler(inline_query: InlineQuery):
 
             if video.get('media_type') == 'images':
                 try:
-                    file_ids = json.loads(video['file_id'])
-                    if file_ids and isinstance(file_ids, list):
+                    parsed = json.loads(video['file_id'])
+                    photo_file_id = None
+                    if isinstance(parsed, dict) and parsed.get("photos"):
+                        photo_file_id = parsed["photos"][0]
+                    elif isinstance(parsed, list) and parsed:
+                        photo_file_id = parsed[0]
+
+                    if photo_file_id:
+                        clean_title = video.get('title', 'Слайдшоу').replace('<b>', '').replace('</b>', '').split('\n')[0]
                         results.append(InlineQueryResultCachedPhoto(
                             id=result_id,
-                            photo_file_id=file_ids[0]
+                            photo_file_id=photo_file_id,
+                            title=f"Слайдшоу: {clean_title}",
+                            description="Отправится обложка и ссылка",
+                            caption=f"{video.get('title', '')}\n\nСмотреть полностью: {video['url']}"
                         ))
                 except json.JSONDecodeError:
                     pass
@@ -38,25 +48,34 @@ async def inline_query_handler(inline_query: InlineQuery):
                 results.append(InlineQueryResultCachedVideo(
                     id=result_id,
                     video_file_id=video['file_id'],
-                    title="Видео"  # Обязательный параметр для API, в UI не виден
+                    title="Видеофайл"
                 ))
     elif any(d in query.lower() for d in ['tiktok.com', 'youtube.com', 'youtu.be']):
         existing_video = await database.get_video_by_url(query)
         if existing_video and existing_video.get('file_id'):
             if existing_video.get('media_type') == 'images':
                 try:
-                    file_ids = json.loads(existing_video['file_id'])
-                    results.append(InlineQueryResultCachedPhoto(
-                        id=str(uuid.uuid4()),
-                        photo_file_id=file_ids[0]
-                    ))
+                    parsed = json.loads(existing_video['file_id'])
+                    photo_file_id = None
+                    if isinstance(parsed, dict) and parsed.get("photos"):
+                        photo_file_id = parsed["photos"][0]
+                    elif isinstance(parsed, list) and parsed:
+                        photo_file_id = parsed[0]
+
+                    if photo_file_id:
+                        results.append(InlineQueryResultCachedPhoto(
+                            id=str(uuid.uuid4()),
+                            photo_file_id=photo_file_id,
+                            title="Отправить обложку слайдшоу",
+                            caption=f"{existing_video.get('title', '')}\n\nСмотреть полностью: {existing_video['url']}"
+                        ))
                 except json.JSONDecodeError:
                     pass
             else:
                 results.append(InlineQueryResultCachedVideo(
                     id=str(uuid.uuid4()),
                     video_file_id=existing_video['file_id'],
-                    title="Видео"
+                    title="Отправить видео"
                 ))
 
         if not results:
@@ -66,7 +85,7 @@ async def inline_query_handler(inline_query: InlineQuery):
                 results.append(InlineQueryResultArticle(
                     id=str(uuid.uuid4()),
                     title="Скачать в этот чат",
-                    description="Нажмите для загрузки",
+                    description="Нажмите для начала загрузки",
                     input_message_content=InputTextMessageContent(message_text=query, parse_mode=None)
                 ))
 
