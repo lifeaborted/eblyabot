@@ -4,8 +4,14 @@ import asyncio
 import os
 from .base import BaseDownloader
 import logging
-logger = logging.getLogger(__name__)
+import time
+import requests
+import asyncio
+import os
+import logging
+from .base import BaseDownloader
 
+logger = logging.getLogger(__name__)
 
 class TiktokDownloader(BaseDownloader):
     def get_ydl_opts(self) -> dict:
@@ -13,16 +19,31 @@ class TiktokDownloader(BaseDownloader):
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
             'quiet': False,
             'merge_output_format': 'mp4',
-            # Без прокси, TikTok качается напрямую
             'extractor_args': {'tiktok': {'language': 'en', 'country': 'US'}},
         }
 
+    def _resolve_url(self, url: str) -> str:
+        if 'vm.tiktok.com' in url.lower() or 'vt.tiktok.com' in url.lower():
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                response = requests.get(url, headers=headers, allow_redirects=True, timeout=10)
+                return response.url
+            except Exception as e:
+                logger.warning(f"Не удалось развернуть ссылку {url}: {e}")
+        return url
+
     async def download(self, url: str, progress_callback=None):
-        if '/photo/' in url.lower():
-            # Перехват TikTok фото-слайдшоу через внешний API TikWM (как было в оригинале)
+        # 1. Разворачиваем короткую мобильную ссылку
+        full_url = await asyncio.to_thread(self._resolve_url, url)
+        clean_url = full_url.split('?')[0]
+
+        # 2. Перехватываем слайдшоу
+        if '/photo/' in clean_url.lower():
             loop = asyncio.get_running_loop()
-            return await asyncio.to_thread(self._download_tiktok_api, url, progress_callback, loop)
-        return await super().download(url, progress_callback)
+            return await asyncio.to_thread(self._download_tiktok_api, clean_url, progress_callback, loop)
+
+        # 3. Передаем в yt-dlp
+        return await super().download(clean_url, progress_callback)
 
     def _download_tiktok_api(self, url: str, progress_callback, loop) -> dict:
         try:

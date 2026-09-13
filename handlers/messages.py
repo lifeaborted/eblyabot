@@ -70,8 +70,10 @@ async def handle_message(message: Message, bot: Bot):
     result = await downloader.download(url, progress_callback=progress_cb)
 
     if not result.get('success'):
-        # Убраны технические детали, выводится суть
-        return await status_msg.edit_text(f"Не удалось скачать файл: {result.get('error', 'неизвестная ошибка')}")
+        return await status_msg.edit_text(
+            f"Не удалось скачать файл: {result.get('error', 'неизвестная ошибка')}",
+            parse_mode=None
+        )
 
     media_type = result.get('media_type', 'video')
     title = result.get('title', 'Медиа')
