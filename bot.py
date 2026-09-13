@@ -21,7 +21,7 @@ async def main():
     logger.info("База данных инициализирована")
     asyncio.create_task(start_web_server())
 
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='Markdown'))
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='HTML'))
     dp = Dispatcher()
 
     dp.include_router(commands_router)

@@ -63,7 +63,8 @@ async def handle_message(message: Message, bot: Bot):
                 filled = int(round(bar_len * percent_or_text / 100))
                 bar = '█' * filled + '░' * (bar_len - filled)
                 await status_msg.edit_text(
-                    f"Загрузка файла...\n\n`[{bar}] {percent_or_text:.1f}%`\nСкорость: `{speed}` | Осталось: `{eta}`")
+                    f"Загрузка файла...\n\n<code>[{bar}] {percent_or_text:.1f}%</code>\nСкорость: <code>{speed}</code> | Осталось: <code>{eta}</code>"
+                )
         except Exception:
             pass
 

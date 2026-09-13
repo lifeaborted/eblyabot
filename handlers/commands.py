@@ -42,15 +42,15 @@ async def history(message: Message):
     if not videos:
         return await message.answer('У вас пока нет истории скачиваний.')
 
-    lines = ["**История скачиваний:**"]
+    lines = ["<b>История скачиваний:</b>"]
     for i, video in enumerate(videos[:10], 1):
-        title = video.get('title', 'Видео')
+        title = video.get('title', 'Видео').replace('<', '').replace('>', '')
         url = video.get('url', 'Нет ссылки')
-        lines.append(f"{i}. {title}\nСсылка: {url}")
+        lines.append(f"<b>{i}.</b> {title}\nСсылка: {url}")
 
     msg = "\n\n".join(lines)
     if len(videos) > 10:
-        msg += f"\n\n_...и еще {len(videos) - 10} видео_"
+        msg += f"\n\n<i>...и еще {len(videos) - 10} видео</i>"
 
     await message.answer(msg, reply_markup=ReplyKeyboardRemove(remove_keyboard=True), disable_web_page_preview=True)
 

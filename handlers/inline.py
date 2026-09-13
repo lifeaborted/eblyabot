@@ -65,7 +65,7 @@ async def inline_query_handler(inline_query: InlineQuery):
                 results.append(InlineQueryResultArticle(
                     id=str(uuid.uuid4()), title="Скачать видео в этот чат",
                     description="Нажмите для начала загрузки",
-                    input_message_content=InputTextMessageContent(message_text=query)
+                    input_message_content=InputTextMessageContent(message_text=query, parse_mode=None)
                 ))
 
     await inline_query.answer(results, cache_time=0, is_personal=True, button=button_config)
