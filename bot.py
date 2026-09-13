@@ -1,71 +1,39 @@
 import asyncio
 import logging
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    InlineQueryHandler,
-    ChosenInlineResultHandler,
-    filters
-)
-from telegram.request import HTTPXRequest
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
 import database
 from web_server import start_web_server
-from handlers.commands import start, history, stats, raupov, help_command
-from handlers.inline import inline_query, chosen_inline_result
-from handlers.web_app import handle_web_app_data
-from handlers.messages import handle_message
+from utils.logger import setup_global_logger
 
+# Создаем локальный логер стандартным способом
 logger = logging.getLogger(__name__)
 
+from handlers.commands import router as commands_router
+from handlers.inline import router as inline_router
+from handlers.messages import router as messages_router
+from handlers.web_app import router as webapp_router
 
-async def post_init(application: Application):
-    """Инициализация БД и веб-сервера при запуске бота"""
+async def main():
     await database.init_db()
     logger.info("База данных инициализирована")
-
     asyncio.create_task(start_web_server())
 
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode='Markdown'))
+    dp = Dispatcher()
 
-def main():
-    request = HTTPXRequest(
-        connection_pool_size=8,
-        connect_timeout=30.0,
-        read_timeout=60.0,
-        write_timeout=60.0,
-        pool_timeout=10.0
-    )
-
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .request(request)
-        .post_init(post_init)
-        .build()
-    )
-
-    # Регистрация обработчиков команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("history", history))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("raupov", raupov))
-    application.add_handler(CommandHandler("help", help_command))
-
-    # Регистрация инлайн обработчиков
-    application.add_handler(InlineQueryHandler(inline_query))
-    application.add_handler(ChosenInlineResultHandler(chosen_inline_result))
-
-    # Регистрация обработчика WebApp
-    application.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
-
-    # Обработчик текстовых сообщений (ссылки TikTok и YouTube)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    dp.include_router(commands_router)
+    dp.include_router(inline_router)
+    dp.include_router(webapp_router)
+    dp.include_router(messages_router)
 
     logger.info("Бот запущен!")
-    application.run_polling()
-
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    main()
+    # ВАЖНО: Вызов настройки логера самым первым
+    setup_global_logger()
+    asyncio.run(main())
