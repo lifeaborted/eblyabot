@@ -21,6 +21,7 @@ DATABASE_NAME = os.getenv('DATABASE_NAME', 'bot_data.db')
 DATABASE_URL = os.getenv('DATABASE_URL')
 DB_TYPE = os.getenv('DB_TYPE', 'sqlite').lower()
 PORT = int(os.getenv('PORT', 8080))
+ADMIN_ID = int(os.getenv('ADMIN_ID', 0))
 
 # Ensure download directory exists
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)

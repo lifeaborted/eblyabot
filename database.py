@@ -1,9 +1,11 @@
-import logging
 import os
 import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from config import DATABASE_NAME, DATABASE_URL, DB_TYPE
+import logging
+logger = logging.getLogger(__name__)
+
 
 if DB_TYPE == 'postgresql':
     import asyncpg
@@ -12,7 +14,6 @@ else:
     import aiosqlite
     HAS_ASPG = False
 
-logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:

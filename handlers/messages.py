@@ -1,326 +1,137 @@
 import os
 import re
 import json
-import logging
-from telegram import Update, InputMediaPhoto, ReplyKeyboardRemove
-from telegram.ext import ContextTypes
-from downloader import MediaDownloader, make_progress_bar
+from aiogram import Router, F, Bot
+from aiogram.types import Message, FSInputFile, InputMediaPhoto
+from downloaders.factory import DownloaderFactory
+from utils.cleanup import temp_files_cleanup
+from config import DOWNLOAD_DIR
 import database
-
+import logging
 logger = logging.getLogger(__name__)
-downloader = MediaDownloader()
 
+router = Router()
+
+URL_REGEX = re.compile(r'https?://(?:www\.|vm\.|vt\.|m\.)?(?:tiktok\.com|youtube\.com|youtu\.be)/[^\s]+', re.IGNORECASE)
 
 def chunk_list(lst: list, n: int):
-    """Вспомогательная функция для разбиения списка на чанки"""
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
 
+@router.message(F.text | F.caption)
+async def handle_message(message: Message, bot: Bot):
+    text = (message.text or message.caption).strip()
 
-async def safe_delete_message(message):
-    """Безопасное удаление сообщения пользователя"""
-    if message:
-        try:
-            await message.delete()
-        except Exception as e:
-            logger.debug(f"Не удалось удалить сообщение: {e}")
+    is_private = message.chat.type == 'private'
+    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot.id
+    me = await bot.get_me()
+    is_mentioned = me.username and (f"@{me.username.lower()}" in text.lower())
+    is_via_bot = message.via_bot and message.via_bot.id == bot.id
 
-
-def cleanup_local_file(path: str):
-    """Удаление локального файла после отправки в Telegram"""
-    if path and os.path.exists(path):
-        try:
-            os.remove(path)
-            logger.info(f"Локальный файл удален: {path}")
-        except Exception as e:
-            logger.warning(f"Ошибка при удалении локального файла {path}: {e}")
-
-
-# Регулярное выражение для поиска ссылок TikTok и YouTube в тексте
-URL_REGEX = re.compile(
-    r'https?://(?:www\.|vm\.|vt\.|m\.)?(?:tiktok\.com|youtube\.com|youtu\.be)/[^\s]+',
-    re.IGNORECASE
-)
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений (ссылок TikTok и YouTube)"""
-    if not update.message:
-        return
-
-    # Берем текст из сообщения ИЛИ из подписи к медиа
-    raw_text = update.message.text or update.message.caption
-    if not raw_text:
-        return
-
-    text = raw_text.strip()
-
-    # === ЛОГИКА: ПРОВЕРКА ОБРАЩЕНИЯ К БОТУ ===
-    chat_type = update.effective_chat.type
-    bot_user = context.bot
-
-    # 1. Это личные сообщения?
-    is_private = chat_type == 'private'
-
-    # 2. Это реплай (ответ) на сообщение бота?
-    is_reply_to_bot = (
-            update.message.reply_to_message and
-            update.message.reply_to_message.from_user.id == bot_user.id
-    )
-
-    # 3. Есть ли упоминание бота в тексте (с учетом регистра)?
-    is_mentioned = bot_user.username and (f"@{bot_user.username.lower()}" in text.lower())
-
-    # 4. Отправлено ли это через инлайн-режим нашего бота?
-    is_via_bot = update.message.via_bot and update.message.via_bot.id == bot_user.id
-
-    # Если ни одно из условий не выполнено — просто молча игнорируем
     if not (is_private or is_reply_to_bot or is_mentioned or is_via_bot):
         return
-    # ===============================================
 
-    # Ищем ссылку в тексте сообщения
     match = URL_REGEX.search(text)
     if not match:
-        # === ВОЗВРАЩАЕМ ОШИБКУ ТОЛЬКО В ЛС ===
         if is_private:
-            await update.message.reply_text(
-                '🎵 Пожалуйста, отправьте корректную ссылку на TikTok или YouTube.\n\n',
-                parse_mode='Markdown',
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await message.answer('Пожалуйста, отправьте ссылку на TikTok или YouTube.')
         return
 
     url = match.group(0)
-    user = update.effective_user
-    chat_id = update.effective_chat.id
+    status_msg = await message.answer('Начинаю скачивание...')
 
-    # 1. Отправляем статусный статус
-    status_message = await context.bot.send_message(
-        chat_id=chat_id,
-        text='⏳ Начинаю скачивание...'
-    )
-
-    # 2. Удаляем исходное сообщение с ссылкой пользователя (если возможно)
-    await safe_delete_message(update.message)
-
-    # 3. Проверяем кэш по найденной ссылке
-    existing_video = await database.get_video_by_url(url)
-
-    if existing_video:
-        await handle_existing_media(context, chat_id, user, url, existing_video, status_message)
-    else:
-        await handle_new_media(context, chat_id, user, url, status_message)
-
-
-async def handle_new_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user, url: str, status_message):
-    """Обработка нового медиа - скачивание с прогресс-баром и отправка"""
     try:
-        # Колбэк прогресс-бара для редактирования статусного сообщения
-        async def progress_cb(percent_or_text, speed=None, eta=None):
+        await message.delete()
+    except Exception:
+        pass
+
+    existing = await database.get_video_by_url(url)
+    if existing:
+        await send_from_cache(message, bot, url, existing, status_msg)
+        return
+
+    downloader = DownloaderFactory.get(url, DOWNLOAD_DIR)
+    if not downloader:
+        return await status_msg.edit_text("Этот сервис не поддерживается. Отправьте ссылку на TikTok или YouTube.")
+
+    async def progress_cb(percent_or_text, speed=None, eta=None):
+        try:
             if isinstance(percent_or_text, str):
-                text = percent_or_text
+                await status_msg.edit_text(percent_or_text)
             else:
-                bar = make_progress_bar(percent_or_text)
-                text = (
-                    f"⏳ **Скачивание видео...**\n\n"
-                    f"`{bar}`\n"
-                    f"Скорость: `{speed}` | Осталось: `{eta}`"
-                )
-            try:
-                await status_message.edit_text(text, parse_mode='Markdown')
-            except Exception as e:
-                logger.debug(f"Progress update skipped: {e}")
+                bar_len = 10
+                filled = int(round(bar_len * percent_or_text / 100))
+                bar = '█' * filled + '░' * (bar_len - filled)
+                await status_msg.edit_text(
+                    f"Загрузка файла...\n\n`[{bar}] {percent_or_text:.1f}%`\nСкорость: `{speed}` | Осталось: `{eta}`")
+        except Exception:
+            pass
 
-        result = await downloader.download_media(url, progress_callback=progress_cb)
+    result = await downloader.download(url, progress_callback=progress_cb)
 
-        if not result['success']:
-            await status_message.edit_text(f"❌ {result.get('error', 'Ошибка скачивания')}")
-            return
+    if not result.get('success'):
+        # Убраны технические детали, выводится суть
+        return await status_msg.edit_text(f"Не удалось скачать файл: {result.get('error', 'неизвестная ошибка')}")
 
-        media_type = result.get('media_type', 'video')
-        title = result.get('title', 'Media')
+    media_type = result.get('media_type', 'video')
+    title = result.get('title', 'Медиа')
+    safe_title = (title[:1000] + '...') if len(title) > 1000 else title
 
-        # Обрезаем заголовок до безопасной длины для Telegram
-        safe_title = (title[:1000] + '...') if len(title) > 1000 else title
+    cleanup_paths = [result.get('file_path')] if media_type == 'video' else result.get('image_paths', [])
+    if result.get('audio_path'):
+        cleanup_paths.append(result.get('audio_path'))
 
+    async with temp_files_cleanup(cleanup_paths):
         if media_type == 'images':
-            # === ОБРАБОТКА ИЗОБРАЖЕНИЙ (СЛАЙДШОУ) ===
-            await status_message.edit_text('📤 Отправляю фотослайдшоу...')
-            image_paths = result.get('image_paths', [])
-
-            # Достаем путь к аудио из ответа загрузчика
-            audio_path = result.get('audio_path')
-
-            if not image_paths:
-                await status_message.edit_text('❌ Изображения не найдены.')
-                return
-
+            await status_msg.edit_text('Отправляю слайдшоу...')
             saved_file_ids = []
 
-            # === ИЗМЕНЕННАЯ ЛОГИКА ЧАНКОВ ===
-            chunks = list(chunk_list(image_paths, 10))
-            total_chunks = len(chunks)
-
-            for chunk_idx, chunk in enumerate(chunks):
+            for chunk_idx, chunk in enumerate(chunk_list(result['image_paths'], 10)):
                 media_group = []
-                opened_files = []
-                try:
-                    for idx, img_path in enumerate(chunk):
-                        f = open(img_path, 'rb')
-                        opened_files.append(f)
-                        caption = f"🎵 {safe_title}" if (chunk_idx == total_chunks - 1 and idx == 0) else None
-                        media_group.append(InputMediaPhoto(media=f, caption=caption))
+                for idx, img_path in enumerate(chunk):
+                    caption = safe_title if (chunk_idx == len(result['image_paths']) // 10 and idx == 0) else None
+                    media_group.append(InputMediaPhoto(type='photo', media=FSInputFile(img_path), caption=caption))
 
-                    sent_msgs = await context.bot.send_media_group(
-                        chat_id=chat_id,
-                        media=media_group,
-                        read_timeout=60,
-                        write_timeout=60
-                    )
+                msgs = await bot.send_media_group(message.chat.id, media=media_group)
+                saved_file_ids.extend([m.photo[-1].file_id for m in msgs if m.photo])
 
-                    for msg in sent_msgs:
-                        if msg.photo:
-                            saved_file_ids.append(msg.photo[-1].file_id)
-                finally:
-                    for f in opened_files:
-                        f.close()
+            if result.get('audio_path') and os.path.exists(result['audio_path']):
+                await message.answer_audio(audio=FSInputFile(result['audio_path']), caption="Оригинальный звук")
 
-            # Отправляем аудио файл отдельным сообщением
-            if audio_path and os.path.exists(audio_path):
-                try:
-                    with open(audio_path, 'rb') as audio_file:
-                        await context.bot.send_audio(
-                            chat_id=chat_id,
-                            audio=audio_file,
-                            caption="🎵 Оригинальный звук"
-                        )
-                    # Очищаем скачанный аудиофайл
-                    cleanup_local_file(audio_path)
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить звук: {e}")
-
-            file_ids_json = json.dumps(saved_file_ids) if saved_file_ids else None
-            await database.add_video(
-                url=url,
-                user_id=user.id,
-                username=user.username,
-                file_path=image_paths[0] if image_paths else None,
-                file_id=file_ids_json,
-                title=title,
-                media_type='images'
-            )
-
-            # Очищаем скачанные изображения с диска
-            for img_path in image_paths:
-                cleanup_local_file(img_path)
-
+            await database.add_video(url=url, user_id=message.from_user.id, username=message.from_user.username,
+                                     file_path=result['image_paths'][0] if result['image_paths'] else None,
+                                     file_id=json.dumps(saved_file_ids) if saved_file_ids else None, title=title,
+                                     media_type='images')
         else:
-            # === ОБРАБОТКА ВИДЕО ===
-            await status_message.edit_text('📤 Отправляю видео...')
-            file_path = result['file_path']
+            await status_msg.edit_text('Отправляю видео...')
+            sent = await message.answer_video(video=FSInputFile(result['file_path']), caption=safe_title)
+            await database.add_video(url=url, user_id=message.from_user.id, username=message.from_user.username,
+                                     file_path=result['file_path'], file_id=sent.video.file_id, title=title,
+                                     media_type='video')
 
-            with open(file_path, 'rb') as video_file:
-                sent_message = await context.bot.send_video(
-                    chat_id=chat_id,
-                    video=video_file,
-                    caption=f"🎵 {safe_title}",
-                    supports_streaming=True,
-                    read_timeout=60,
-                    write_timeout=60
-                )
-
-            file_id = sent_message.video.file_id if sent_message.video else None
-
-            await database.add_video(
-                url=url,
-                user_id=user.id,
-                username=user.username,
-                file_path=file_path,
-                file_id=file_id,
-                title=title,
-                media_type='video'
-            )
-
-            # Очищаем скачанный файл с диска
-            cleanup_local_file(file_path)
-
-        # Удаляем статусный статус
-        await safe_delete_message(status_message)
-        logger.info(f"Медиа ({media_type}) для {url} успешно отправлено {user.id}")
-
-    except Exception as e:
-        logger.error(f"Ошибка при обработке нового медиа: {e}", exc_info=True)
-        await status_message.edit_text(
-            '❌ Произошла ошибка при обработке медиа.\n'
-            'Попробуйте еще раз позже.'
-        )
+    await status_msg.delete()
 
 
-async def handle_existing_media(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user, url: str, media_data: dict, status_message):
-    """Обработка существующего медиа из кэша"""
+async def send_from_cache(message: Message, bot: Bot, url: str, media_data: dict, status_msg: Message):
+    title = media_data.get('title', 'Медиа')
+    safe_title = (title[:1000] + '...') if len(title) > 1000 else title
+    file_id = media_data.get('file_id')
+
     try:
-        media_type = media_data.get('media_type', 'video')
-        title = media_data.get('title', 'Media Item')
-        file_id = media_data.get('file_id')
-
-        # Обрезаем заголовок до безопасной длины для Telegram
-        safe_title = (title[:1000] + '...') if len(title) > 1000 else title
-
-        if media_type == 'images':
-            if file_id:
-                try:
-                    file_ids = json.loads(file_id) if file_id.startswith('[') else [file_id]
-                    for chunk_idx, chunk in enumerate(chunk_list(file_ids, 10)):
-                        media_group = []
-                        for idx, fid in enumerate(chunk):
-                            caption = f"🎵 {safe_title}" if (chunk_idx == 0 and idx == 0) else None
-                            media_group.append(InputMediaPhoto(media=fid, caption=caption))
-                        await context.bot.send_media_group(chat_id=chat_id, media=media_group)
-
-                    await safe_delete_message(status_message)
-                    logger.info(f"Фотослайдшоу отправлено из кэша (file_ids) пользователю {user.id}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить фото из кэша file_ids: {e}")
-
+        if media_data.get('media_type') == 'images' and file_id:
+            file_ids = json.loads(file_id) if file_id.startswith('[') else [file_id]
+            for chunk_idx, chunk in enumerate(chunk_list(file_ids, 10)):
+                media_group = [InputMediaPhoto(type='photo', media=fid,
+                                               caption=safe_title if (chunk_idx == 0 and idx == 0) else None) for
+                               idx, fid in enumerate(chunk)]
+                await bot.send_media_group(message.chat.id, media=media_group)
+        elif file_id:
+            await message.answer_video(video=file_id, caption=safe_title)
+            await database.update_video_file_id(url, file_id)
         else:
-            if file_id:
-                try:
-                    await context.bot.send_video(
-                        chat_id=chat_id,
-                        video=file_id,
-                        caption=f"🎵 {safe_title}",
-                        supports_streaming=True
-                    )
-                    await database.update_video_file_id(url, file_id)
-                    await safe_delete_message(status_message)
-                    logger.info(f"Видео отправлено из кэша (file_id) пользователю {user.id}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить видео через file_id: {e}")
+            return await status_msg.edit_text('Файл не найден. Пожалуйста, отправьте ссылку еще раз.')
 
-            file_path = media_data.get('file_path')
-            if file_path and os.path.exists(file_path):
-                with open(file_path, 'rb') as video_file:
-                    sent_message = await context.bot.send_video(
-                        chat_id=chat_id,
-                        video=video_file,
-                        caption=f"🎵 {safe_title}",
-                        supports_streaming=True
-                    )
-
-                if sent_message.video:
-                    await database.update_video_file_id(url, sent_message.video.file_id)
-
-                cleanup_local_file(file_path)
-                await safe_delete_message(status_message)
-                logger.info(f"Видео отправлено из локального файла пользователю {user.id}")
-                return
-
-        await status_message.edit_text('⚠️ Файл не найден в кэше. Скачиваю заново...')
-        await handle_new_media(context, chat_id, user, url, status_message)
-
+        await status_msg.delete()
     except Exception as e:
-        logger.error(f"Ошибка при отправке кэшированного медиа: {e}", exc_info=True)
-        await handle_new_media(context, chat_id, user, url, status_message)
+        logger.error(f"Ошибка отправки файла: {e}")
+        await status_msg.edit_text('Произошла ошибка при поиске файла. Пожалуйста, отправьте ссылку еще раз.')

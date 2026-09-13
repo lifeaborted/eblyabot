@@ -1,116 +1,82 @@
-import logging
-from telegram import Update, WebAppInfo, MenuButtonWebApp, ReplyKeyboardRemove
-from telegram.ext import ContextTypes
-from config import SERVER_URL
+import os
+from aiogram import Router, Bot
+from aiogram.types import Message, MenuButtonWebApp, WebAppInfo, ReplyKeyboardRemove
+from aiogram.filters import CommandStart, Command, CommandObject
+from aiogram.types import FSInputFile
+from config import ADMIN_ID, SERVER_URL
 import database
-
+import logging
 logger = logging.getLogger(__name__)
+router = Router()
 
+@router.message(CommandStart(deep_link=True))
+async def start_new_download(message: Message, command: CommandObject):
+    if command.args == 'new_download':
+        await message.answer('Отправьте ссылку в этот чат, чтобы видео стало доступно через бота в любых чатах.')
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
-    user = update.effective_user
-
-    # Проверяем, пришел ли пользователь по кнопке из инлайн-режима
-    if context.args and context.args[0] == 'new_download':
-        await update.message.reply_text(
-            f'Отправь ссылку в этот чат, чтобы медиа стала доступна черезе @gruzdtbot в любых чатах',
-            parse_mode='Markdown'
-        )
-        return
-
-    # Стандартная логика старта (если просто написали /start)
+@router.message(CommandStart())
+async def start_normal(message: Message, bot: Bot):
+    user = message.from_user
     normal_url = f"{SERVER_URL}/?user_id={user.id}&username={user.username or 'unknown'}"
 
     try:
-        await context.bot.set_chat_menu_button(
+        await bot.set_chat_menu_button(
             chat_id=user.id,
-            menu_button=MenuButtonWebApp(
-                text="насрать",
-                web_app=WebAppInfo(url=normal_url)
-            )
-        )
-
-        await update.message.reply_text(
-            f'Привет, {user.first_name}! 👋\n\n'
-            'способы использования:\n\n'
-            ' - с помощью кнопки через сайт\n'
-            ' - отправить ссылку на тт и шорты в лс\n'
-            ' - добавить в чат с правами админа и тегать со ссылкой',
-            reply_markup=ReplyKeyboardRemove()
+            menu_button=MenuButtonWebApp(type="web_app", text="Сайт", web_app=WebAppInfo(url=normal_url))
         )
     except Exception as e:
         logger.error(f"Error setting menu button: {e}")
 
+    await message.answer(
+        f'Привет, {user.first_name}!\n\n'
+        'Как пользоваться:\n'
+        '— Отправьте ссылку на видео в этот чат\n'
+        '— Воспользуйтесь кнопкой сайта\n'
+        '— Добавьте бота в группу и тегните его вместе со ссылкой',
+        reply_markup=ReplyKeyboardRemove(remove_keyboard=True)
+    )
 
-async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать историю скачиваний пользователя"""
-    user = update.effective_user
-    videos = await database.get_user_videos(user.id)
-
+@router.message(Command("history"))
+async def history(message: Message):
+    videos = await database.get_user_videos(message.from_user.id)
     if not videos:
-        await update.message.reply_text('📭 У тебя пока нет истории скачиваний.')
-        return
+        return await message.answer('У вас пока нет истории скачиваний.')
 
-    lines = ["**история скачиваний:**"]
-
+    lines = ["**История скачиваний:**"]
     for i, video in enumerate(videos[:10], 1):
-        # Оставляем полные названия и ссылки
-        title = video.get('title', 'Media Item')
+        title = video.get('title', 'Видео')
         url = video.get('url', 'Нет ссылки')
-
-        # Форматируем дату (убираем миллисекунды, если они есть)
-        raw_date = str(video.get('created_at', ''))
-        date_str = raw_date.split('.')[0] if '.' in raw_date else raw_date
-
-        item_text = (
-            f"*{i}.* {title}\n"
-            f"   📅 {date_str}\n"
-            f"   🔗 {url}"
-        )
-        lines.append(item_text)
+        lines.append(f"{i}. {title}\nСсылка: {url}")
 
     msg = "\n\n".join(lines)
-
     if len(videos) > 10:
         msg += f"\n\n_...и еще {len(videos) - 10} видео_"
 
-    # Отправляем сообщение, обязательно отключив превью ссылок (disable_web_page_preview)
-    await update.message.reply_text(
-        msg,
-        parse_mode='Markdown',
-        reply_markup=ReplyKeyboardRemove(),
-        disable_web_page_preview=True
-    )
+    await message.answer(msg, reply_markup=ReplyKeyboardRemove(remove_keyboard=True), disable_web_page_preview=True)
 
-
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать статистику"""
-    user = update.effective_user
-    user_videos = await database.get_user_videos(user.id)
+@router.message(Command("stats"))
+async def stats(message: Message):
+    user_videos = await database.get_user_videos(message.from_user.id)
     total_videos = await database.get_total_videos()
+    msg = (f'Статистика бота:\n\n'
+           f'Ваши скачивания: {len(user_videos)}\n'
+           f'Всего загрузок: {total_videos}')
+    await message.answer(msg, reply_markup=ReplyKeyboardRemove(remove_keyboard=True))
 
-    message = (
-        f'дроч на цифры:\n\n'
-        f' - твоих скачиваний: {len(user_videos)}\n'
-        f' - всего скачиваний в боте: {total_videos}\n'
-        f' - деанон: {user.first_name} (id: {user.id})'
-    )
+@router.message(Command("help"))
+async def help_command(message: Message):
+    await message.answer('/start — Начать работу\n/history — История скачиваний\n/stats — Статистика', reply_markup=ReplyKeyboardRemove(remove_keyboard=True))
 
-    await update.message.reply_text(message, reply_markup=ReplyKeyboardRemove())
+@router.message(Command("logs"))
+async def get_logs(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
 
-
-async def raupov(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /raupov"""
-    await update.message.reply_text('Раупов согласны', reply_markup=ReplyKeyboardRemove())
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /help"""
-    await update.message.reply_text(
-        '/start - начать работу\n'
-        '/history - твоя история скачиваний\n'
-        '/stats - статистика\n'
-        '/help - помощь',
-        reply_markup=ReplyKeyboardRemove()
-    )
+    log_path = 'bot.log'
+    if os.path.exists(log_path) and os.path.getsize(log_path) > 0:
+        await message.answer_document(
+            document=FSInputFile(log_path),
+            caption="Логи за последние 24 часа"
+        )
+    else:
+        await message.answer("Файл логов пуст или еще не создан.")
