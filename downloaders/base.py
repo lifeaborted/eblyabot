@@ -4,6 +4,7 @@ import re
 import time
 import logging
 import yt_dlp
+import requests
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, Optional
 
@@ -23,9 +24,7 @@ class BaseDownloader(ABC):
         opts = self.get_ydl_opts()
         loop = asyncio.get_running_loop()
 
-        # Перенаправляем логи yt-dlp в нашу систему логирования
         opts['logger'] = logging.getLogger('yt-dlp')
-
         last_update_time = [0.0]
 
         def ytdl_hook(d):
@@ -49,16 +48,99 @@ class BaseDownloader(ABC):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                if not info: return {'success': False, 'error': 'Не удалось получить инфо'}
-                return {
-                    'success': True,
-                    'media_type': 'video',
-                    'file_path': ydl.prepare_filename(info),
-                    'title': info.get('title', 'Media'),
-                    'uploader': info.get('uploader', 'Unknown'),
-                }
+                if not info:
+                    return {'success': False, 'error': 'Не удалось получить метаданные по ссылке.'}
+
+                title = info.get('title', 'Media')
+                uploader = info.get('uploader', 'Unknown')
+
+                image_paths = []
+                audio_path = None
+
+                # 1. yt-dlp собирает физические скачанные файлы в блоке requested_downloads
+                if 'requested_downloads' in info:
+                    for req in info['requested_downloads']:
+                        fp = req.get('filepath')
+                        if fp and os.path.exists(fp):
+                            ext = os.path.splitext(fp)[1].lower()
+                            if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                image_paths.append(fp)
+                            elif ext in ['.mp3', '.m4a', '.wav', '.aac', '.ogg']:
+                                audio_path = fp
+
+                # 2. Проверяем вложенные элементы (актуально для каруселей TikTok)
+                if 'entries' in info and info['entries']:
+                    for entry in info['entries']:
+                        if not entry: continue
+
+                        if 'requested_downloads' in entry:
+                            for req in entry['requested_downloads']:
+                                fp = req.get('filepath')
+                                if fp and os.path.exists(fp):
+                                    ext = os.path.splitext(fp)[1].lower()
+                                    if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                        image_paths.append(fp)
+                                    elif ext in ['.mp3', '.m4a', '.wav', '.aac', '.ogg']:
+                                        audio_path = fp
+                        else:
+                            try:
+                                fp = ydl.prepare_filename(entry)
+                                if os.path.exists(fp):
+                                    ext = os.path.splitext(fp)[1].lower()
+                                    if ext in ['.jpg', '.jpeg', '.png', '.webp']:
+                                        image_paths.append(fp)
+                                    elif ext in ['.mp3', '.m4a', '.wav', '.aac', '.ogg']:
+                                        audio_path = fp
+                            except Exception:
+                                pass
+
+                    # ФОЛБЭК: Если yt-dlp достал только ссылки на картинки, но не сохранил их сам
+                    if not image_paths:
+                        for idx, entry in enumerate(info['entries']):
+                            img_url = entry.get('url')
+                            if img_url and (entry.get('ext', '').lower() in ['jpg', 'jpeg', 'png',
+                                                                             'webp'] or '/obj/' in img_url):
+                                out_path = os.path.join(self.download_dir, f"{info.get('id')}_img_{idx}.jpg")
+                                try:
+                                    r = requests.get(img_url, timeout=10)
+                                    if r.status_code == 200:
+                                        with open(out_path, 'wb') as f:
+                                            f.write(r.content)
+                                        image_paths.append(out_path)
+                                except Exception as e:
+                                    logger.error(f"Не удалось вручную скачать картинку {img_url}: {e}")
+
+                # Убираем дубликаты
+                image_paths = sorted(list(set(image_paths)))
+
+                if image_paths:
+                    return {
+                        'success': True,
+                        'media_type': 'images',
+                        'image_paths': image_paths,
+                        'audio_path': audio_path,
+                        'title': title,
+                        'uploader': uploader
+                    }
+
+                # 3. Если это обычное видео
+                single_filename = ydl.prepare_filename(info)
+                if not os.path.exists(single_filename):
+                    if 'requested_downloads' in info and info['requested_downloads']:
+                        single_filename = info['requested_downloads'][0].get('filepath')
+
+                if single_filename and os.path.exists(single_filename):
+                    return {
+                        'success': True,
+                        'media_type': 'video',
+                        'file_path': single_filename,
+                        'title': title,
+                        'uploader': uploader,
+                    }
+                else:
+                    return {'success': False, 'error': 'Файл не был найден на диске после скачивания.'}
+
         except Exception as e:
-            # <-- Теперь любая ошибка скачивания будет подробно писаться в лог
             logger.error(f"Ошибка при скачивании yt-dlp: {e}", exc_info=True)
             err = re.sub(r'\x1b\[[0-9;]*m', '', str(e)).replace('ERROR:', '').strip()
             return {'success': False, 'error': f'{err}'}
