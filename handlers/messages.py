@@ -8,6 +8,8 @@ from downloaders.factory import DownloaderFactory
 from utils.cleanup import temp_files_cleanup
 from config import DOWNLOAD_DIR
 import database
+from utils.url_resolver import resolve_url
+from utils.format import format_caption
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -25,7 +27,6 @@ async def handle_message(message: Message, bot: Bot):
     text = (message.text or message.caption).strip()
     user_id = message.from_user.id
 
-    # === ЛОГИРОВАНИЕ ВХОДЯЩЕГО СООБЩЕНИЯ ===
     logger.info(f"--- [USER: {user_id}] Входящее сообщение: {text} ---")
 
     is_private = message.chat.type == 'private'
@@ -35,12 +36,10 @@ async def handle_message(message: Message, bot: Bot):
     is_via_bot = message.via_bot and message.via_bot.id == bot.id
 
     if not (is_private or is_reply_to_bot or is_mentioned or is_via_bot):
-        logger.info(f"[USER: {user_id}] Игнорирую (сообщение не подходит по контексту чата).")
         return
 
     match = URL_REGEX.search(text)
     if not match:
-        logger.info(f"[USER: {user_id}] В тексте не найдена поддерживаемая ссылка.")
         if is_private:
             await message.answer('Пожалуйста, отправьте ссылку на TikTok или YouTube.')
         return
@@ -51,19 +50,21 @@ async def handle_message(message: Message, bot: Bot):
 
     try:
         await message.delete()
-    except Exception as e:
-        logger.warning(f"[USER: {user_id}] Не удалось удалить оригинальное сообщение: {e}")
+    except Exception:
+        pass
 
-    existing = await database.get_video_by_url(url)
+    resolved_url = await resolve_url(url)
+
+    existing = await database.get_video_by_url(resolved_url)
     if existing:
-        logger.info(f"[USER: {user_id}] Файл найден в БД (Кэш). Выгружаем...")
-        await send_from_cache(message, bot, url, existing, status_msg)
+        logger.info(f"[USER: {user_id}] Файл найден в БД. Выгружаем кэш...")
+        await send_from_cache(message, bot, resolved_url, existing, status_msg)
         return
 
-    downloader = DownloaderFactory.get(url, DOWNLOAD_DIR)
+    downloader = DownloaderFactory.get(resolved_url, DOWNLOAD_DIR)
     if not downloader:
         logger.error(f"[USER: {user_id}] Загрузчик не найден для {url}")
-        return await status_msg.edit_text("Этот сервис не поддерживается. Отправьте ссылку на TikTok или YouTube.")
+        return await status_msg.edit_text("Этот сервис не поддерживается.")
 
     async def progress_cb(percent_or_text, speed=None, eta=None):
         try:
@@ -74,13 +75,13 @@ async def handle_message(message: Message, bot: Bot):
                 filled = int(round(bar_len * percent_or_text / 100))
                 bar = '█' * filled + '░' * (bar_len - filled)
                 await status_msg.edit_text(
-                    f"Загрузка файла...\n\n<code>[{bar}] {percent_or_text:.1f}%</code>\nСкорость: <code>{speed}</code> | Осталось: <code>{eta}</code>"
+                    f"Загрузка...\n\n<code>[{bar}] {percent_or_text:.1f}%</code>\nСкорость: <code>{speed}</code> | Осталось: <code>{eta}</code>"
                 )
         except Exception:
             pass
 
     logger.info(f"[USER: {user_id}] Старт скачивания через {type(downloader).__name__}...")
-    result = await downloader.download(url, progress_callback=progress_cb)
+    result = await downloader.download(resolved_url, progress_callback=progress_cb)
 
     if not result.get('success'):
         error_text = result.get('error', 'неизвестная ошибка')
@@ -88,10 +89,15 @@ async def handle_message(message: Message, bot: Bot):
         return await status_msg.edit_text(f"Не удалось скачать файл: {error_text}", parse_mode=None)
 
     media_type = result.get('media_type', 'video')
-    title = result.get('title', 'Медиа')
-    safe_title = (title[:1000] + '...') if len(title) > 1000 else title
 
-    logger.info(f"[USER: {user_id}] Скачивание завершено. Тип: {media_type}, Заголовок: {title}")
+    safe_caption = format_caption(
+        result.get('uploader', 'Unknown'),
+        result.get('title', ''),
+        result.get('description', ''),
+        result.get('tags', [])
+    )
+
+    logger.info(f"[USER: {user_id}] Скачивание завершено. Тип: {media_type}")
 
     cleanup_paths = [result.get('file_path')] if media_type == 'video' else result.get('image_paths', [])
     if result.get('audio_path'):
@@ -106,28 +112,55 @@ async def handle_message(message: Message, bot: Bot):
             for chunk_idx, chunk in enumerate(chunk_list(result['image_paths'], 10)):
                 media_group = []
                 for idx, img_path in enumerate(chunk):
-                    caption = safe_title if (chunk_idx == len(result['image_paths']) // 10 and idx == 0) else None
+                    caption = safe_caption if (chunk_idx == 0 and idx == 0) else None
                     media_group.append(InputMediaPhoto(type='photo', media=FSInputFile(img_path), caption=caption))
 
-                msgs = await bot.send_media_group(message.chat.id, media=media_group)
-                saved_file_ids.extend([m.photo[-1].file_id for m in msgs if m.photo])
+                # === УМНАЯ ОТПРАВКА С ИСКЛЮЧЕНИЕМ БИТЫХ ФОТО ===
+                current_group = list(media_group)
+                while current_group:
+                    try:
+                        msgs = await bot.send_media_group(message.chat.id, media=current_group)
+                        saved_file_ids.extend([m.photo[-1].file_id for m in msgs if m.photo])
+                        break  # Успех, выходим из цикла
+                    except Exception as e:
+                        err_str = str(e)
+                        match = re.search(r'failed to send message #(\d+)', err_str)
+                        if match and "IMAGE_PROCESS_FAILED" in err_str:
+                            bad_idx = int(match.group(1)) - 1
+                            if 0 <= bad_idx < len(current_group):
+                                logger.warning(f"Удаляю битое фото (индекс {bad_idx}) из пачки {chunk_idx}")
+                                current_group.pop(bad_idx)
+                                # Если после удаления осталась 1 картинка, send_media_group выдаст ошибку
+                                if len(current_group) == 1:
+                                    item = current_group[0]
+                                    msg = await bot.send_photo(message.chat.id, photo=item.media, caption=item.caption)
+                                    saved_file_ids.append(msg.photo[-1].file_id)
+                                    break
+                                continue  # Пробуем отправить карусель заново без битого фото
+
+                        logger.error(f"[USER: {user_id}] Критическая ошибка отправки карусели {chunk_idx}: {e}")
+                        break
 
             if result.get('audio_path') and os.path.exists(result['audio_path']):
-                logger.info(f"[USER: {user_id}] Отправляю аудиодорожку...")
-                await message.answer_audio(audio=FSInputFile(result['audio_path']), caption="Оригинальный звук")
+                try:
+                    logger.info(f"[USER: {user_id}] Отправляю аудиодорожку...")
+                    await message.answer_audio(audio=FSInputFile(result['audio_path']), caption="Оригинальный звук")
+                except Exception as e:
+                    logger.error(f"[USER: {user_id}] Ошибка отправки аудио: {e}")
 
-            await database.add_video(url=url, user_id=user_id, username=message.from_user.username,
-                                     file_path=result['image_paths'][0] if result['image_paths'] else None,
-                                     file_id=json.dumps(saved_file_ids) if saved_file_ids else None, title=title,
-                                     media_type='images')
-            logger.info(f"[USER: {user_id}] Слайдшоу успешно отправлено и занесено в БД.")
+            if saved_file_ids:
+                await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
+                                         file_path=result['image_paths'][0] if result['image_paths'] else None,
+                                         file_id=json.dumps(saved_file_ids), title=safe_caption, media_type='images')
+                logger.info(f"[USER: {user_id}] Слайдшоу успешно отправлено и занесено в БД.")
         else:
             logger.info(f"[USER: {user_id}] Отправляю видеофайл...")
             await status_msg.edit_text('Отправляю видео...')
-            sent = await message.answer_video(video=FSInputFile(result['file_path']), caption=safe_title)
-            await database.add_video(url=url, user_id=user_id, username=message.from_user.username,
-                                     file_path=result['file_path'], file_id=sent.video.file_id, title=title,
-                                     media_type='video')
+            sent = await message.answer_video(video=FSInputFile(result['file_path']), caption=safe_caption)
+
+            await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
+                                     file_path=result['file_path'], file_id=sent.video.file_id,
+                                     title=safe_caption, media_type='video')
             logger.info(f"[USER: {user_id}] Видео успешно отправлено и занесено в БД.")
 
     await status_msg.delete()
@@ -135,8 +168,7 @@ async def handle_message(message: Message, bot: Bot):
 
 async def send_from_cache(message: Message, bot: Bot, url: str, media_data: dict, status_msg: Message):
     user_id = message.from_user.id
-    title = media_data.get('title', 'Медиа')
-    safe_title = (title[:1000] + '...') if len(title) > 1000 else title
+    safe_caption = media_data.get('title', 'Медиа')
     file_id = media_data.get('file_id')
 
     try:
@@ -145,14 +177,20 @@ async def send_from_cache(message: Message, bot: Bot, url: str, media_data: dict
             file_ids = json.loads(file_id) if file_id.startswith('[') else [file_id]
             for chunk_idx, chunk in enumerate(chunk_list(file_ids, 10)):
                 media_group = [InputMediaPhoto(type='photo', media=fid,
-                                               caption=safe_title if (chunk_idx == 0 and idx == 0) else None) for
+                                               caption=safe_caption if (chunk_idx == 0 and idx == 0) else None) for
                                idx, fid in enumerate(chunk)]
-                await bot.send_media_group(message.chat.id, media=media_group)
+
+                # Защита для кэша (если в пачке остался 1 элемент)
+                if len(media_group) == 1:
+                    await bot.send_photo(message.chat.id, photo=media_group[0].media, caption=media_group[0].caption)
+                else:
+                    await bot.send_media_group(message.chat.id, media=media_group)
+
             logger.info(f"[USER: {user_id}] Слайдшоу из кэша отправлено.")
 
         elif file_id:
             logger.info(f"[USER: {user_id}] Выгрузка видео по File ID: {file_id}")
-            await message.answer_video(video=file_id, caption=safe_title)
+            await message.answer_video(video=file_id, caption=safe_caption)
             await database.update_video_file_id(url, file_id)
             logger.info(f"[USER: {user_id}] Видео из кэша отправлено.")
         else:

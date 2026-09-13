@@ -51,8 +51,10 @@ class BaseDownloader(ABC):
                 if not info:
                     return {'success': False, 'error': 'Не удалось получить метаданные по ссылке.'}
 
-                title = info.get('title', 'Media')
-                uploader = info.get('uploader', 'Unknown')
+                title = info.get('title', '')
+                description = info.get('description', '')
+                uploader = info.get('uploader') or info.get('creator') or info.get('channel') or 'Unknown'
+                tags = info.get('tags', [])
 
                 image_paths = []
                 audio_path = None
@@ -135,7 +137,9 @@ class BaseDownloader(ABC):
                         'media_type': 'video',
                         'file_path': single_filename,
                         'title': title,
+                        'description': description,
                         'uploader': uploader,
+                        'tags': tags
                     }
                 else:
                     return {'success': False, 'error': 'Файл не был найден на диске после скачивания.'}
