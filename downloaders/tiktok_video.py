@@ -4,6 +4,7 @@ class TiktokVideoDownloader(BaseDownloader):
     def get_ydl_opts(self) -> dict:
         return {
             'outtmpl': f'{self.download_dir}/%(id)s.%(ext)s',
+            'proxy': 'socks5://127.0.0.1:1080',
             'quiet': False,
             'merge_output_format': 'mp4',
             'extractor_args': {'tiktok': {'language': 'en', 'country': 'US'}},

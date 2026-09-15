@@ -11,22 +11,25 @@ from .base import BaseDownloader
 
 logger = logging.getLogger(__name__)
 
+# Направляем весь трафик через локальный Cloudflare WARP
+PROXIES = {
+    'http': 'socks5://127.0.0.1:1080',
+    'https': 'socks5://127.0.0.1:1080'
+}
+
 
 class TiktokSlideshowDownloader(BaseDownloader):
     def get_ydl_opts(self) -> dict:
         return {}
 
     def _fix_image(self, img_path: str) -> bool:
-        """Безопасное сжатие: лимит 1280x2560, обрезка нечетных пикселей, фикс цветового профиля"""
         tmp_path = img_path + ".tmp.jpg"
         cmd = [
             'ffmpeg', '-y',
             '-i', img_path,
-            # scale - ограничивает макс. размер. crop - делает стороны четными (важно для yuv420p)
-            '-vf', "scale='min(1280,iw)':'min(2560,ih)':force_original_aspect_ratio=decrease,crop=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
             '-c:v', 'mjpeg',
-            '-q:v', '3',
-            '-map_metadata', '-1', # Сносит битые EXIF-заголовки
+            '-pix_fmt', 'yuv420p',
+            '-map_metadata', '-1',
             '-frames:v', '1',
             tmp_path
         ]
@@ -81,7 +84,8 @@ class TiktokSlideshowDownloader(BaseDownloader):
 
         for idx, img_url in enumerate(images, 1):
             try:
-                r = requests.get(img_url, headers=headers, timeout=15)
+                # Качаем фото через прокси
+                r = requests.get(img_url, headers=headers, proxies=PROXIES, timeout=15)
                 if r.status_code == 200 and len(r.content) > 1024:
                     path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}_{idx}.jpg")
                     with open(path, 'wb') as f:
@@ -102,7 +106,8 @@ class TiktokSlideshowDownloader(BaseDownloader):
         audio_path = None
         if audio:
             try:
-                r = requests.get(audio, headers=headers, timeout=15)
+                # Качаем аудио через прокси
+                r = requests.get(audio, headers=headers, proxies=PROXIES, timeout=15)
                 if r.status_code == 200 and len(r.content) > 1024:
                     audio_path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}.mp3")
                     with open(audio_path, 'wb') as f:
@@ -137,9 +142,21 @@ class TiktokSlideshowDownloader(BaseDownloader):
         }
 
     def _get_data(self, url: str):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Upgrade-Insecure-Requests': '1'
+        }
+
+        logger.info("Попытка 1: Парсим оригинальный HTML TikTok...")
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
-            resp = requests.get(url, headers=headers, timeout=15)
+            # Стучимся в TikTok через прокси
+            resp = requests.get(url, headers=headers, proxies=PROXIES, timeout=15, allow_redirects=True)
+
             match = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([^<]+)</script>', resp.text)
             if match:
                 data = json.loads(match.group(1))
@@ -160,19 +177,51 @@ class TiktokSlideshowDownloader(BaseDownloader):
                 desc = item.get('desc', '')
 
                 if images:
+                    logger.info("Успех: Данные получены через HTML-парсер (REHYDRATION).")
                     return images, audio, author, desc
-        except Exception as e:
-            logger.warning(f"HTML Scrape failed: {e}")
 
-        try:
-            resp = requests.post("https://www.tikwm.com/api/", data={"url": url, "hd": 1}, timeout=15).json()
-            if resp.get("code") == 0:
-                data = resp.get("data", {})
-                if data.get("images"):
-                    return data["images"], data.get("music", ""), data.get("author", {}).get("nickname",
-                                                                                             "Unknown"), data.get(
-                        "title", "")
+            match_sigi = re.search(r'<script id="SIGI_STATE"[^>]*>([^<]+)</script>', resp.text)
+            if match_sigi:
+                data = json.loads(match_sigi.group(1))
+                item_module = data.get('ItemModule', {})
+                if item_module:
+                    video_id = list(item_module.keys())[0]
+                    item = item_module[video_id]
+
+                    images = []
+                    if item.get('imagePost') and item.get('imagePost').get('images'):
+                        images = [img['imageURL']['urlList'][0] for img in item['imagePost']['images'] if
+                                  img.get('imageURL')]
+
+                    audio = item.get('music', {}).get('playUrl')
+                    author = item.get('author', 'Unknown')
+                    desc = item.get('desc', '')
+
+                    if images:
+                        logger.info("Успех: Данные получены через HTML-парсер (SIGI_STATE).")
+                        return images, audio, author, desc
+
+            logger.warning("Собственный парсер не нашел данных. TikTok мог выдать капчу.")
         except Exception as e:
-            logger.warning(f"TikWM API fallback failed: {e}")
+            logger.warning(f"Ошибка при работе собственного парсера HTML: {e}")
+
+        logger.info("Попытка 2: Переход на резервный API (TikWM)...")
+        try:
+            # Стучимся в TikWM через прокси
+            resp = requests.post("https://www.tikwm.com/api/", data={"url": url, "hd": 1},
+                                 headers={'User-Agent': headers['User-Agent']}, proxies=PROXIES, timeout=15)
+            if resp.status_code == 200:
+                resp_json = resp.json()
+                if resp_json.get("code") == 0:
+                    data = resp_json.get("data", {})
+                    if data.get("images"):
+                        logger.info("Успех: Данные получены через TikWM.")
+                        return data["images"], data.get("music", ""), data.get("author", {}).get("nickname",
+                                                                                                 "Unknown"), data.get(
+                            "title", "")
+            else:
+                logger.warning(f"Резервный API TikWM вернул статус-код: {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Сбой подключения к резервному API TikWM: {e}")
 
         return None, None, None, None

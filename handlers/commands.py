@@ -136,3 +136,14 @@ async def configure_forward_chats(message: Message, command: CommandObject):
         f"Сохраненные ID:\n<code>{chats_str}</code>\n\n"
         f"Убедитесь, что бот добавлен в эти чаты в качестве администратора или имеет права на отправку файлов."
     )
+
+
+@router.message(Command("logs"))
+async def command_logs(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return await message.answer("У вас нет прав для выполнения этой команды.")
+
+    if os.path.exists("bot.log"):
+        await message.answer_document(FSInputFile("bot.log"))
+    else:
+        await message.answer("Файл логов не найден на сервере.")
