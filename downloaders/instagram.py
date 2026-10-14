@@ -4,9 +4,9 @@ import json
 import logging
 import os
 import re
-import subprocess
 import uuid
 import requests
+from curl_cffi import requests as cffi_requests
 from typing import Optional, Callable, Dict, Any, List, Tuple
 from .base import BaseDownloader
 
@@ -25,6 +25,8 @@ class InstagramDownloader(BaseDownloader):
             'outtmpl': f'{self.download_dir}/ig_%(id)s.%(ext)s',
             'quiet': False,
             'merge_output_format': 'mp4',
+            # Позволяет yt-dlp не падать на фото-постах и фото-слайдах в каруселях Instagram
+            'ignore_no_formats_error': True,
             'http_headers': {
                 'User-Agent': USER_AGENT,
                 'Accept-Language': 'en-US,en;q=0.9',
@@ -40,38 +42,13 @@ class InstagramDownloader(BaseDownloader):
         match = re.search(r'/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)', url)
         return match.group(1) if match else None
 
-    def _fix_image(self, img_path: str) -> bool:
-        tmp_path = img_path + ".tmp.jpg"
-        cmd = [
-            'ffmpeg', '-y',
-            '-i', img_path,
-            '-c:v', 'mjpeg',
-            '-pix_fmt', 'yuv420p',
-            '-map_metadata', '-1',
-            '-frames:v', '1',
-            tmp_path
-        ]
-        try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1024:
-                os.replace(tmp_path, img_path)
-                return True
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            return False
-        except Exception as e:
-            logger.warning(f"Ошибка конвертации изображения Instagram {img_path}: {e}")
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            return False
-
     async def download(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         logger.info(f"Instagram Попытка 1: Запуск yt-dlp для {url}")
         result = await super().download(url, progress_callback)
         if result.get('success'):
             return result
 
-        logger.info(f"yt-dlp не справился ({result.get('error')}). Переход к парсеру фото/каруселей...")
+        logger.info(f"yt-dlp не справился ({result.get('error')}). Переход к резервному парсеру...")
         if progress_callback:
             try:
                 await progress_callback("⏳ Обрабатываю публикацию Instagram...")
@@ -101,10 +78,12 @@ class InstagramDownloader(BaseDownloader):
                     video_path = os.path.join(self.download_dir, f"ig_{shortcode}_{run_id}.mp4")
                     with open(video_path, 'wb') as f:
                         f.write(r.content)
+                    thumb_path = self._generate_thumbnail(video_path)
                     return {
                         'success': True,
                         'media_type': 'video',
                         'file_path': video_path,
+                        'thumbnail_path': thumb_path,
                         'title': caption,
                         'description': caption,
                         'uploader': author,
@@ -158,9 +137,11 @@ class InstagramDownloader(BaseDownloader):
                 'X-IG-App-ID': '936619743392459',
                 'X-FB-LSD': 'AVqbxe3J_YA',
                 'X-ASBD-ID': '129477',
-                'Sec-Fetch-Site': 'same-origin',
+                'Origin': 'https://www.instagram.com',
+                'Referer': f'https://www.instagram.com/p/{shortcode}/',
             }
             payload = {
+                'lsd': 'AVqbxe3J_YA',
                 'variables': json.dumps({
                     'shortcode': shortcode,
                     'fetch_tagged_user_count': None,
@@ -169,11 +150,12 @@ class InstagramDownloader(BaseDownloader):
                 }),
                 'doc_id': '8845758582119845'
             }
-            resp = requests.post(
+            resp = cffi_requests.post(
                 'https://www.instagram.com/graphql/query',
                 headers=gql_headers,
                 data=payload,
                 proxies=active_proxies,
+                impersonate='chrome',
                 timeout=15
             )
             if resp.status_code == 200:
@@ -189,10 +171,11 @@ class InstagramDownloader(BaseDownloader):
         logger.info(f"Instagram Попытка 3: Парсинг Embed-страницы для {shortcode}...")
         try:
             embed_url = f"https://www.instagram.com/p/{shortcode}/embed/captioned/"
-            resp = requests.get(
+            resp = cffi_requests.get(
                 embed_url,
                 headers={'User-Agent': USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'},
                 proxies=active_proxies,
+                impersonate='chrome',
                 timeout=15
             )
             if resp.status_code == 200:
@@ -218,7 +201,7 @@ class InstagramDownloader(BaseDownloader):
                     raw_cap = re.sub(r'<[^>]+>', ' ', cap_match.group(1))
                     caption = html.unescape(re.sub(r'\s+', ' ', raw_cap)).strip()
 
-                video_match = re.search(r'"video_url":\s*"([^"]+)"', text)
+                video_match = re.search(r'\\?"video_url\\?":\s*\\?"([^"\\]+)', text)
                 if video_match:
                     v_url = video_match.group(1).encode('utf-8').decode('unicode_escape').replace(r'\/', '/')
                     return v_url, [], author, caption

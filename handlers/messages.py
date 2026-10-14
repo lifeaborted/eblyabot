@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import asyncio
 import logging
 from aiogram import Router, F, Bot
 from aiogram.types import Message, FSInputFile, InputMediaPhoto
@@ -103,12 +104,75 @@ async def handle_message(message: Message, bot: Bot):
 
     logger.info(f"[USER: {user_id}] Скачивание завершено. Тип: {media_type}")
 
-    cleanup_paths = [result.get('file_path')] if media_type == 'video' else result.get('image_paths', [])
+    cleanup_paths = [result.get('file_path')] if media_type == 'video' else list(result.get('image_paths', []))
     if result.get('audio_path'):
         cleanup_paths.append(result.get('audio_path'))
+    if result.get('thumbnail_path'):
+        cleanup_paths.append(result.get('thumbnail_path'))
 
     async with temp_files_cleanup(cleanup_paths):
-        if media_type == 'images':
+        if media_type == 'video':
+            file_path = result['file_path']
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            logger.info(f"[USER: {user_id}] Отправляю видеофайл ({file_size_mb:.1f} МБ)...")
+
+            if file_size_mb > 50:
+                return await status_msg.edit_text(
+                    f"Видео слишком большое ({file_size_mb:.1f} МБ). Лимит Telegram для ботов — 50 МБ."
+                )
+
+            await status_msg.edit_text('Отправляю видео...')
+
+            sent = None
+            for attempt in range(1, 4):
+                try:
+                    thumb_file = (
+                        FSInputFile(result['thumbnail_path'])
+                        if result.get('thumbnail_path') and os.path.exists(result['thumbnail_path'])
+                        else None
+                    )
+                    sent = await message.answer_video(
+                        video=FSInputFile(file_path),
+                        caption=safe_caption,
+                        thumbnail=thumb_file,
+                        width=result.get('width'),
+                        height=result.get('height'),
+                        duration=result.get('duration'),
+                        supports_streaming=True,
+                        request_timeout=120
+                    )
+                    break
+                except Exception as e:
+                    logger.warning(f"[USER: {user_id}] Попытка отправки видео {attempt}/3 не удалась: {e}")
+                    if attempt == 3:
+                        raise e
+                    await asyncio.sleep(1.5)
+
+            video_file_id = sent.video.file_id
+
+            forward_chats = await database.get_user_forward_chats(user_id)
+            if forward_chats:
+                for f_chat in forward_chats:
+                    if f_chat == message.chat.id:
+                        continue
+                    try:
+                        await bot.send_video(f_chat, video=video_file_id, caption=safe_caption)
+                    except Exception as e:
+                        logger.error(f"[USER: {user_id}] Ошибка пересылки видео в {f_chat}: {e}")
+                        await message.answer(f"Не удалось переслать видео в чат {f_chat}.")
+
+            await database.add_video(
+                url=resolved_url,
+                user_id=user_id,
+                username=message.from_user.username,
+                file_path=file_path,
+                file_id=video_file_id,
+                title=safe_caption,
+                media_type='video'
+            )
+            logger.info(f"[USER: {user_id}] Видео успешно отправлено и занесено в БД.")
+
+        elif media_type == 'images':
             logger.info(f"[USER: {user_id}] Отправляю фото-карусель (картинок: {len(result['image_paths'])})...")
             await status_msg.edit_text('Отправляю слайдшоу...')
             saved_file_ids = []
@@ -158,7 +222,8 @@ async def handle_message(message: Message, bot: Bot):
             forward_chats = await database.get_user_forward_chats(user_id)
             if forward_chats and (saved_file_ids or audio_file_id):
                 for f_chat in forward_chats:
-                    if f_chat == message.chat.id: continue
+                    if f_chat == message.chat.id:
+                        continue
                     try:
                         if saved_file_ids:
                             for chunk_idx, chunk in enumerate(chunk_list(saved_file_ids, 10)):
@@ -172,39 +237,31 @@ async def handle_message(message: Message, bot: Bot):
                                 else:
                                     await bot.send_media_group(f_chat, media=mg)
                         if audio_file_id:
-                            await bot.send_audio(f_chat, audio=audio_file_id, caption="Оригинальный звук",
-                                                 title="Оригинальный звук", performer=uploader_name)
+                            await bot.send_audio(
+                                f_chat,
+                                audio=audio_file_id,
+                                caption="Оригинальный звук",
+                                title="Оригинальный звук",
+                                performer=uploader_name
+                            )
                     except Exception as e:
                         logger.error(f"[USER: {user_id}] Ошибка пересылки слайдшоу в {f_chat}: {e}")
                         await message.answer(
-                            f"Не удалось переслать контент в чат {f_chat}. Убедитесь, что бот имеет права на отправку сообщений.")
+                            f"Не удалось переслать контент в чат {f_chat}. Убедитесь, что бот имеет права на отправку сообщений."
+                        )
 
             if saved_file_ids or audio_file_id:
                 cache_data = {"photos": saved_file_ids, "audio": audio_file_id}
-                await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
-                                         file_path=result['image_paths'][0] if result.get('image_paths') else None,
-                                         file_id=json.dumps(cache_data), title=safe_caption, media_type='images')
+                await database.add_video(
+                    url=resolved_url,
+                    user_id=user_id,
+                    username=message.from_user.username,
+                    file_path=result['image_paths'][0] if result.get('image_paths') else None,
+                    file_id=json.dumps(cache_data),
+                    title=safe_caption,
+                    media_type='images'
+                )
                 logger.info(f"[USER: {user_id}] Слайдшоу и аудио успешно сохранены в БД.")
-        else:
-            logger.info(f"[USER: {user_id}] Отправляю видеофайл...")
-            await status_msg.edit_text('Отправляю видео...')
-            sent = await message.answer_video(video=FSInputFile(result['file_path']), caption=safe_caption)
-            video_file_id = sent.video.file_id
-
-            forward_chats = await database.get_user_forward_chats(user_id)
-            if forward_chats:
-                for f_chat in forward_chats:
-                    if f_chat == message.chat.id: continue
-                    try:
-                        await bot.send_video(f_chat, video=video_file_id, caption=safe_caption)
-                    except Exception as e:
-                        logger.error(f"[USER: {user_id}] Ошибка пересылки видео в {f_chat}: {e}")
-                        await message.answer(f"Не удалось переслать видео в чат {f_chat}.")
-
-            await database.add_video(url=resolved_url, user_id=user_id, username=message.from_user.username,
-                                     file_path=result['file_path'], file_id=video_file_id,
-                                     title=safe_caption, media_type='video')
-            logger.info(f"[USER: {user_id}] Видео успешно отправлено и занесено в БД.")
 
     await status_msg.delete()
 
@@ -240,11 +297,16 @@ async def send_from_cache(message: Message, bot: Bot, url: str, media_data: dict
                 try:
                     if photo_ids:
                         for chunk_idx, chunk in enumerate(chunk_list(photo_ids, 10)):
-                            media_group = [InputMediaPhoto(type='photo', media=fid, caption=safe_caption if (
-                                        chunk_idx == 0 and idx == 0) else None) for idx, fid in enumerate(chunk)]
+                            media_group = [
+                                InputMediaPhoto(
+                                    type='photo',
+                                    media=fid,
+                                    caption=safe_caption if (chunk_idx == 0 and idx == 0) else None
+                                )
+                                for idx, fid in enumerate(chunk)
+                            ]
                             if len(media_group) == 1:
-                                await bot.send_photo(chat_id, photo=media_group[0].media,
-                                                     caption=media_group[0].caption)
+                                await bot.send_photo(chat_id, photo=media_group[0].media, caption=media_group[0].caption)
                             else:
                                 await bot.send_media_group(chat_id, media=media_group)
 
