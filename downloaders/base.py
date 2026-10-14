@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import socket
 import time
 import logging
 import yt_dlp
@@ -16,6 +17,24 @@ class BaseDownloader(ABC):
         self.download_dir = download_dir
         os.makedirs(self.download_dir, exist_ok=True)
 
+    @property
+    def proxy_url(self) -> Optional[str]:
+        """Возвращает прокси из .env или локальный wireproxy (127.0.0.1:1080), если он запущен"""
+        env_proxy = os.getenv('PROXY_URL')
+        if env_proxy:
+            return env_proxy
+        try:
+            with socket.create_connection(('127.0.0.1', 1080), timeout=0.3):
+                return 'socks5://127.0.0.1:1080'
+        except OSError:
+            return None
+
+    @property
+    def proxies(self) -> Optional[Dict[str, str]]:
+        """Словарь прокси для библиотеки requests"""
+        p = self.proxy_url
+        return {'http': p, 'https': p} if p else None
+
     @abstractmethod
     def get_ydl_opts(self) -> dict:
         pass
@@ -23,6 +42,13 @@ class BaseDownloader(ABC):
     async def download(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         opts = self.get_ydl_opts()
         loop = asyncio.get_running_loop()
+
+        # Автоматически подключаем прокси для yt-dlp, если он активен
+        active_proxy = self.proxy_url
+        if active_proxy:
+            opts['proxy'] = active_proxy
+        else:
+            opts.pop('proxy', None)
 
         opts['logger'] = logging.getLogger('yt-dlp')
         last_update_time = [0.0]
@@ -70,10 +96,11 @@ class BaseDownloader(ABC):
                             elif ext in ['.mp3', '.m4a', '.wav', '.aac', '.ogg']:
                                 audio_path = fp
 
-                # 2. Проверяем вложенные элементы (актуально для каруселей TikTok)
+                # 2. Проверяем вложенные элементы (актуально для каруселей)
                 if 'entries' in info and info['entries']:
                     for entry in info['entries']:
-                        if not entry: continue
+                        if not entry:
+                            continue
 
                         if 'requested_downloads' in entry:
                             for req in entry['requested_downloads']:
@@ -100,11 +127,10 @@ class BaseDownloader(ABC):
                     if not image_paths:
                         for idx, entry in enumerate(info['entries']):
                             img_url = entry.get('url')
-                            if img_url and (entry.get('ext', '').lower() in ['jpg', 'jpeg', 'png',
-                                                                             'webp'] or '/obj/' in img_url):
+                            if img_url and (entry.get('ext', '').lower() in ['jpg', 'jpeg', 'png', 'webp'] or '/obj/' in img_url):
                                 out_path = os.path.join(self.download_dir, f"{info.get('id')}_img_{idx}.jpg")
                                 try:
-                                    r = requests.get(img_url, timeout=10)
+                                    r = requests.get(img_url, proxies=self.proxies, timeout=10)
                                     if r.status_code == 200:
                                         with open(out_path, 'wb') as f:
                                             f.write(r.content)
@@ -112,7 +138,6 @@ class BaseDownloader(ABC):
                                 except Exception as e:
                                     logger.error(f"Не удалось вручную скачать картинку {img_url}: {e}")
 
-                # Убираем дубликаты
                 image_paths = sorted(list(set(image_paths)))
 
                 if image_paths:

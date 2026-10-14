@@ -11,12 +11,6 @@ from .base import BaseDownloader
 
 logger = logging.getLogger(__name__)
 
-# Направляем весь трафик через локальный Cloudflare WARP
-PROXIES = {
-    'http': 'socks5://127.0.0.1:1080',
-    'https': 'socks5://127.0.0.1:1080'
-}
-
 
 class TiktokSlideshowDownloader(BaseDownloader):
     def get_ydl_opts(self) -> dict:
@@ -39,11 +33,13 @@ class TiktokSlideshowDownloader(BaseDownloader):
                 os.replace(tmp_path, img_path)
                 return True
             else:
-                if os.path.exists(tmp_path): os.remove(tmp_path)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
                 return False
         except Exception as e:
             logger.warning(f"Ошибка конвертации изображения {img_path}: {e}")
-            if os.path.exists(tmp_path): os.remove(tmp_path)
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
             return False
 
     def _stitch_video(self, image_path: str, audio_path: str, video_id: str, run_id: str) -> str:
@@ -71,7 +67,8 @@ class TiktokSlideshowDownloader(BaseDownloader):
         video_id = video_id_match.group(1) if video_id_match else "unknown"
         run_id = uuid.uuid4().hex[:6]
 
-        images, audio, author, title = self._get_data(url)
+        active_proxies = self.proxies
+        images, audio, author, title = self._get_data(url, active_proxies)
 
         if not images:
             return {'success': False, 'error': 'Не удалось получить фотографии. Возможно, видео приватное.'}
@@ -84,8 +81,7 @@ class TiktokSlideshowDownloader(BaseDownloader):
 
         for idx, img_url in enumerate(images, 1):
             try:
-                # Качаем фото через прокси
-                r = requests.get(img_url, headers=headers, proxies=PROXIES, timeout=15)
+                r = requests.get(img_url, headers=headers, proxies=active_proxies, timeout=15)
                 if r.status_code == 200 and len(r.content) > 1024:
                     path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}_{idx}.jpg")
                     with open(path, 'wb') as f:
@@ -94,7 +90,8 @@ class TiktokSlideshowDownloader(BaseDownloader):
                     if self._fix_image(path):
                         downloaded_imgs.append(path)
                     else:
-                        if os.path.exists(path): os.remove(path)
+                        if os.path.exists(path):
+                            os.remove(path)
                 else:
                     logger.warning(f"Фото {idx} не скачано. Код: {r.status_code}")
             except Exception as e:
@@ -106,8 +103,7 @@ class TiktokSlideshowDownloader(BaseDownloader):
         audio_path = None
         if audio:
             try:
-                # Качаем аудио через прокси
-                r = requests.get(audio, headers=headers, proxies=PROXIES, timeout=15)
+                r = requests.get(audio, headers=headers, proxies=active_proxies, timeout=15)
                 if r.status_code == 200 and len(r.content) > 1024:
                     audio_path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}.mp3")
                     with open(audio_path, 'wb') as f:
@@ -118,8 +114,10 @@ class TiktokSlideshowDownloader(BaseDownloader):
         if len(downloaded_imgs) == 1 and audio_path and os.path.exists(audio_path):
             try:
                 video_path = self._stitch_video(downloaded_imgs[0], audio_path, video_id, run_id)
-                if os.path.exists(downloaded_imgs[0]): os.remove(downloaded_imgs[0])
-                if os.path.exists(audio_path): os.remove(audio_path)
+                if os.path.exists(downloaded_imgs[0]):
+                    os.remove(downloaded_imgs[0])
+                if os.path.exists(audio_path):
+                    os.remove(audio_path)
                 return {
                     'success': True,
                     'media_type': 'video',
@@ -141,7 +139,7 @@ class TiktokSlideshowDownloader(BaseDownloader):
             'description': title
         }
 
-    def _get_data(self, url: str):
+    def _get_data(self, url: str, active_proxies: Optional[dict]):
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -154,8 +152,7 @@ class TiktokSlideshowDownloader(BaseDownloader):
 
         logger.info("Попытка 1: Парсим оригинальный HTML TikTok...")
         try:
-            # Стучимся в TikTok через прокси
-            resp = requests.get(url, headers=headers, proxies=PROXIES, timeout=15, allow_redirects=True)
+            resp = requests.get(url, headers=headers, proxies=active_proxies, timeout=15, allow_redirects=True)
 
             match = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([^<]+)</script>', resp.text)
             if match:
@@ -207,18 +204,25 @@ class TiktokSlideshowDownloader(BaseDownloader):
 
         logger.info("Попытка 2: Переход на резервный API (TikWM)...")
         try:
-            # Стучимся в TikWM через прокси
-            resp = requests.post("https://www.tikwm.com/api/", data={"url": url, "hd": 1},
-                                 headers={'User-Agent': headers['User-Agent']}, proxies=PROXIES, timeout=15)
+            resp = requests.post(
+                "https://www.tikwm.com/api/",
+                data={"url": url, "hd": 1},
+                headers={'User-Agent': headers['User-Agent']},
+                proxies=active_proxies,
+                timeout=15
+            )
             if resp.status_code == 200:
                 resp_json = resp.json()
                 if resp_json.get("code") == 0:
                     data = resp_json.get("data", {})
                     if data.get("images"):
                         logger.info("Успех: Данные получены через TikWM.")
-                        return data["images"], data.get("music", ""), data.get("author", {}).get("nickname",
-                                                                                                 "Unknown"), data.get(
-                            "title", "")
+                        return (
+                            data["images"],
+                            data.get("music", ""),
+                            data.get("author", {}).get("nickname", "Unknown"),
+                            data.get("title", "")
+                        )
             else:
                 logger.warning(f"Резервный API TikWM вернул статус-код: {resp.status_code}")
         except Exception as e:

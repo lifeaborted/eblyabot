@@ -5,6 +5,7 @@ from aiogram import Bot
 from aiogram.types import FSInputFile
 from config import BOT_TOKEN, PORT, DOWNLOAD_DIR
 from downloaders.factory import DownloaderFactory
+from utils.url_resolver import resolve_url
 import database
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ async def serve_video(request):
 
 async def api_download(request):
     data = await request.json()
-    url = data.get('url')
+    url = await resolve_url(data.get('url', ''))
 
     existing = await database.get_video_by_url(url)
     if existing and existing.get('file_path') and os.path.exists(existing['file_path']):

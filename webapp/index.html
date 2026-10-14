@@ -345,7 +345,7 @@
             return;
         }
 
-        const isSupported = url.includes('tiktok.com') || url.includes('youtube.com') || url.includes('youtu.be');
+        const isSupported = url.includes('tiktok.com') || url.includes('tt.site') || url.includes('youtube.com') || url.includes('youtu.be') || url.includes('instagram.com') || url.includes('ig.me');
         if (!isSupported) {
             showStatus('not a valid tiktok or youtube link...', 'error');
             return;

@@ -14,7 +14,10 @@ from utils.format import format_caption
 logger = logging.getLogger(__name__)
 router = Router()
 
-URL_REGEX = re.compile(r'https?://(?:www\.|vm\.|vt\.|m\.)?(?:tiktok\.com|youtube\.com|youtu\.be)/[^\s]+', re.IGNORECASE)
+URL_REGEX = re.compile(
+    r'https?://(?:www\.|vm\.|vt\.|m\.|dd\.|kk\.)?(?:tiktok\.com|tt\.site|youtube\.com|youtu\.be|instagram\.com|ig\.me)/[^\s]+',
+    re.IGNORECASE
+)
 
 
 def chunk_list(lst: list, n: int):
@@ -41,7 +44,7 @@ async def handle_message(message: Message, bot: Bot):
     match = URL_REGEX.search(text)
     if not match:
         if is_private:
-            await message.answer('Пожалуйста, отправьте ссылку на TikTok или YouTube.')
+            await message.answer('Пожалуйста, отправьте ссылку на TikTok, YouTube или Instagram.')
         return
 
     url = match.group(0)

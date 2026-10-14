@@ -50,7 +50,7 @@ async def inline_query_handler(inline_query: InlineQuery):
                     video_file_id=video['file_id'],
                     title="Видеофайл"
                 ))
-    elif any(d in query.lower() for d in ['tiktok.com', 'youtube.com', 'youtu.be']):
+    elif any(d in query.lower() for d in ['tiktok.com', 'tt.site', 'youtube.com', 'youtu.be', 'instagram.com', 'ig.me']):
         existing_video = await database.get_video_by_url(query)
         if existing_video and existing_video.get('file_id'):
             if existing_video.get('media_type') == 'images':
@@ -94,7 +94,7 @@ async def inline_query_handler(inline_query: InlineQuery):
 @router.chosen_inline_result()
 async def chosen_inline_result_handler(chosen_result: ChosenInlineResult):
     query = chosen_result.query
-    if any(d in query.lower() for d in ['tiktok.com', 'youtube.com', 'youtu.be']):
+    if any(d in query.lower() for d in ['tiktok.com', 'tt.site', 'youtube.com', 'youtu.be', 'instagram.com', 'ig.me']):
         video = await database.get_video_by_url(query)
         if video and video.get('file_id'):
             await database.update_video_file_id(video['url'], video['file_id'])
