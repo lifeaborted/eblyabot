@@ -45,6 +45,7 @@ class BaseDownloader(ABC):
         tmp_path = img_path + ".tmp.jpg"
         cmd = [
             'ffmpeg', '-y',
+            '-threads', '1',
             '-i', img_path,
             '-c:v', 'mjpeg',
             '-pix_fmt', 'yuv420p',
@@ -71,6 +72,7 @@ class BaseDownloader(ABC):
         thumb_path = f"{os.path.splitext(video_path)[0]}_thumb.jpg"
         cmd = [
             'ffmpeg', '-y',
+            '-threads', '1',
             '-ss', '00:00:00.100',
             '-i', video_path,
             '-frames:v', '1',
