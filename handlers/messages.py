@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 URL_REGEX = re.compile(
-    r'https?://(?:www\.|vm\.|vt\.|m\.|dd\.|kk\.)?(?:tiktok\.com|tt\.site|youtube\.com|youtu\.be|instagram\.com|ig\.me)/[^\s]+',
+    r'https?://(?:www\.|vm\.|vt\.|m\.|dd\.|kk\.)?(?:tiktok\.com|tt\.site|youtube\.com|youtu\.be|instagram\.com|ig\.me)/[^\s,]+',
     re.IGNORECASE
 )
 
@@ -42,21 +42,28 @@ async def handle_message(message: Message, bot: Bot):
     if not (is_private or is_reply_to_bot or is_mentioned or is_via_bot):
         return
 
-    match = URL_REGEX.search(text)
-    if not match:
+    urls = list(dict.fromkeys(match.group(0).rstrip('.,;!?)') for match in URL_REGEX.finditer(text)))
+    if not urls:
         if is_private:
-            await message.answer('Пожалуйста, отправьте ссылку на TikTok, YouTube или Instagram.')
+            await message.answer('Пожалуйста, отправьте одну или несколько ссылок на TikTok, YouTube или Instagram.')
         return
-
-    url = match.group(0)
-    logger.info(f"[USER: {user_id}] Найдена ссылка: {url}")
-    status_msg = await message.answer('Начинаю скачивание...')
 
     try:
         await message.delete()
     except Exception:
         pass
 
+    for url in urls:
+        logger.info(f"[USER: {user_id}] Найдена ссылка: {url}")
+        status_msg = await message.answer('Начинаю скачивание...')
+        try:
+            await process_url(message, bot, user_id, url, status_msg)
+        except Exception:
+            logger.exception(f"[USER: {user_id}] Ошибка обработки ссылки: {url}")
+            await status_msg.edit_text(f'Не удалось обработать ссылку: {url}', parse_mode=None)
+
+
+async def process_url(message: Message, bot: Bot, user_id: int, url: str, status_msg: Message):
     resolved_url = await resolve_url(url)
 
     existing = await database.get_video_by_url(resolved_url)
