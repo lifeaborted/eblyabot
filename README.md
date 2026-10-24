@@ -11,6 +11,7 @@ Features:
 - Inline query support
 - User download history
 - SQLite database for storing video metadata
+- Multiple links in one Telegram message, processed in order
 
 ## Prerequisites
 
