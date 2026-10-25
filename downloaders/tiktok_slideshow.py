@@ -8,7 +8,7 @@ import logging
 import subprocess
 import uuid
 from typing import Optional, Callable
-from .base import BaseDownloader
+from .base import BaseDownloader, MAX_FILE_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,14 @@ class TiktokSlideshowDownloader(BaseDownloader):
             '-max_interleave_delta', '100M',
             output_path
         ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=45)
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=45)
+            if os.path.getsize(output_path) > MAX_FILE_SIZE:
+                raise ValueError('Файл превышает лимит 50 МБ')
+        except Exception:
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            raise
         return output_path
 
     async def download(self, url: str, progress_callback: Optional[Callable] = None):
@@ -88,19 +95,15 @@ class TiktokSlideshowDownloader(BaseDownloader):
 
         for idx, img_url in enumerate(images, 1):
             try:
-                r = requests.get(img_url, headers=headers, proxies=active_proxies, timeout=15)
-                if r.status_code == 200 and len(r.content) > 1024:
-                    path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}_{idx}.jpg")
-                    with open(path, 'wb') as f:
-                        f.write(r.content)
-
+                path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}_{idx}.jpg")
+                if self._download_file(img_url, path, headers, active_proxies, 15):
                     if self._fix_image(path):
                         downloaded_imgs.append(path)
                     else:
                         if os.path.exists(path):
                             os.remove(path)
                 else:
-                    logger.warning(f"Фото {idx} не скачано. Код: {r.status_code}")
+                    logger.warning(f"Фото {idx} не скачано")
             except Exception as e:
                 logger.error(f"Ошибка скачивания фото {idx}: {e}")
 
@@ -110,11 +113,9 @@ class TiktokSlideshowDownloader(BaseDownloader):
         audio_path = None
         if audio:
             try:
-                r = requests.get(audio, headers=headers, proxies=active_proxies, timeout=15)
-                if r.status_code == 200 and len(r.content) > 1024:
-                    audio_path = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}.mp3")
-                    with open(audio_path, 'wb') as f:
-                        f.write(r.content)
+                candidate = os.path.join(self.download_dir, f"tt_{video_id}_{run_id}.mp3")
+                if self._download_file(audio, candidate, headers, active_proxies, 15):
+                    audio_path = candidate
             except Exception as e:
                 logger.error(f"Ошибка скачивания аудио: {e}")
 

@@ -5,7 +5,6 @@ import logging
 import os
 import re
 import uuid
-import requests
 from curl_cffi import requests as cffi_requests
 from typing import Optional, Callable, Dict, Any, List, Tuple
 from .base import BaseDownloader
@@ -73,11 +72,8 @@ class InstagramDownloader(BaseDownloader):
 
         if video_url and not image_urls:
             try:
-                r = requests.get(video_url, headers=headers, proxies=active_proxies, timeout=20)
-                if r.status_code == 200 and len(r.content) > 1024:
-                    video_path = os.path.join(self.download_dir, f"ig_{shortcode}_{run_id}.mp4")
-                    with open(video_path, 'wb') as f:
-                        f.write(r.content)
+                video_path = os.path.join(self.download_dir, f"ig_{shortcode}_{run_id}.mp4")
+                if self._download_file(video_url, video_path, headers, active_proxies, 20):
                     thumb_path = self._generate_thumbnail(video_path)
                     return {
                         'success': True,
@@ -96,12 +92,8 @@ class InstagramDownloader(BaseDownloader):
             downloaded_imgs = []
             for idx, img_url in enumerate(image_urls, 1):
                 try:
-                    r = requests.get(img_url, headers=headers, proxies=active_proxies, timeout=15)
-                    if r.status_code == 200 and len(r.content) > 1024:
-                        path = os.path.join(self.download_dir, f"ig_{shortcode}_{run_id}_{idx}.jpg")
-                        with open(path, 'wb') as f:
-                            f.write(r.content)
-
+                    path = os.path.join(self.download_dir, f"ig_{shortcode}_{run_id}_{idx}.jpg")
+                    if self._download_file(img_url, path, headers, active_proxies, 15):
                         if self._fix_image(path):
                             downloaded_imgs.append(path)
                         elif os.path.exists(path):

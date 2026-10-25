@@ -5,12 +5,14 @@ import socket
 import subprocess
 import time
 import logging
+import uuid
 import yt_dlp
 import requests
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 class BaseDownloader(ABC):
@@ -54,7 +56,7 @@ class BaseDownloader(ABC):
             tmp_path
         ]
         try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=30)
             if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1024:
                 os.replace(tmp_path, img_path)
                 return True
@@ -81,16 +83,40 @@ class BaseDownloader(ABC):
             thumb_path
         ]
         try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=30)
             if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
                 return thumb_path
         except Exception:
             pass
+        if os.path.exists(thumb_path):
+            os.remove(thumb_path)
         return None
+
+    def _download_file(self, url: str, path: str, headers: dict, proxies: Optional[dict], timeout: int) -> bool:
+        success = False
+        try:
+            with requests.get(url, headers=headers, proxies=proxies, timeout=timeout, stream=True) as response:
+                content_length = response.headers.get('Content-Length', '')
+                if response.status_code != 200 or (content_length.isdecimal() and int(content_length) > MAX_FILE_SIZE):
+                    return False
+                size = 0
+                with open(path, 'wb') as output:
+                    for chunk in response.iter_content(chunk_size=64 * 1024):
+                        size += len(chunk)
+                        if size > MAX_FILE_SIZE:
+                            return False
+                        output.write(chunk)
+                success = size > 1024
+                return success
+        finally:
+            if not success and os.path.exists(path):
+                os.remove(path)
 
     async def download(self, url: str, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
         opts = self.get_ydl_opts()
         loop = asyncio.get_running_loop()
+        run_id = uuid.uuid4().hex
+        opts['outtmpl'] = opts['outtmpl'].replace('%(id)s', f'%(id)s_{run_id}')
 
         active_proxy = self.proxy_url
         if active_proxy:
@@ -99,9 +125,12 @@ class BaseDownloader(ABC):
             opts.pop('proxy', None)
 
         opts['logger'] = logging.getLogger('yt-dlp')
+        opts['max_filesize'] = MAX_FILE_SIZE
         last_update_time = [0.0]
 
         def ytdl_hook(d):
+            if d.get('status') == 'downloading' and d.get('downloaded_bytes', 0) > MAX_FILE_SIZE:
+                raise ValueError('Файл превышает лимит 50 МБ')
             if d.get('status') == 'downloading' and progress_callback:
                 current_time = time.time()
                 if current_time - last_update_time[0] < 3.0:
@@ -116,9 +145,14 @@ class BaseDownloader(ABC):
                 asyncio.run_coroutine_threadsafe(progress_callback(percent, speed, eta), loop)
 
         opts['progress_hooks'] = [ytdl_hook]
-        return await asyncio.to_thread(self._sync_download, url, opts)
+        result = await asyncio.to_thread(self._sync_download, url, opts, run_id)
+        if not result.get('success'):
+            for entry in os.scandir(self.download_dir):
+                if run_id in entry.name and entry.is_file():
+                    os.remove(entry.path)
+        return result
 
-    def _sync_download(self, url: str, opts: dict) -> Dict[str, Any]:
+    def _sync_download(self, url: str, opts: dict, run_id: str) -> Dict[str, Any]:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -192,21 +226,22 @@ class BaseDownloader(ABC):
                                 img_url = entry['thumbnails'][-1].get('url')
 
                             if img_url:
-                                out_path = os.path.join(self.download_dir, f"{info.get('id', 'post')}_img_{idx}.jpg")
+                                out_path = os.path.join(self.download_dir, f"{info.get('id', 'post')}_{run_id}_img_{idx}.jpg")
                                 try:
-                                    r = requests.get(img_url, headers=headers, proxies=self.proxies, timeout=15)
-                                    if r.status_code == 200 and len(r.content) > 1024:
-                                        with open(out_path, 'wb') as f:
-                                            f.write(r.content)
-                                        if self._fix_image(out_path):
-                                            image_paths.append(out_path)
+                                    if self._download_file(img_url, out_path, headers, self.proxies, 15) and self._fix_image(out_path):
+                                        image_paths.append(out_path)
                                 except Exception as e:
                                     logger.error(f"Не удалось скачать картинку слайда {img_url}: {e}")
+                                if out_path not in image_paths and os.path.exists(out_path):
+                                    os.remove(out_path)
 
                 # Убираем дубликаты, сохраняя порядок слайдов
                 image_paths = list(dict.fromkeys(image_paths))
 
                 if image_paths:
+                    for path in video_paths:
+                        if os.path.exists(path):
+                            os.remove(path)
                     return {
                         'success': True,
                         'media_type': 'images',
@@ -232,6 +267,8 @@ class BaseDownloader(ABC):
                         single_filename = prepared
 
                 if single_filename and os.path.exists(single_filename):
+                    if os.path.getsize(single_filename) > MAX_FILE_SIZE:
+                        return {'success': False, 'error': 'Файл превышает лимит 50 МБ'}
                     thumb_path = self._generate_thumbnail(single_filename)
                     return {
                         'success': True,
@@ -251,25 +288,23 @@ class BaseDownloader(ABC):
                 if not info.get('formats'):
                     img_url = info.get('thumbnail') or (info['thumbnails'][-1].get('url') if info.get('thumbnails') else None)
                     if img_url:
-                        out_path = os.path.join(self.download_dir, f"{info.get('id', 'single')}_img.jpg")
+                        out_path = os.path.join(self.download_dir, f"{info.get('id', 'single')}_{run_id}_img.jpg")
                         try:
-                            r = requests.get(img_url, headers=headers, proxies=self.proxies, timeout=15)
-                            if r.status_code == 200 and len(r.content) > 1024:
-                                with open(out_path, 'wb') as f:
-                                    f.write(r.content)
-                                if self._fix_image(out_path):
-                                    return {
-                                        'success': True,
-                                        'media_type': 'images',
-                                        'image_paths': [out_path],
-                                        'audio_path': None,
-                                        'title': title,
-                                        'description': description,
-                                        'uploader': uploader,
-                                        'tags': tags
-                                    }
+                            if self._download_file(img_url, out_path, headers, self.proxies, 15) and self._fix_image(out_path):
+                                return {
+                                    'success': True,
+                                    'media_type': 'images',
+                                    'image_paths': [out_path],
+                                    'audio_path': None,
+                                    'title': title,
+                                    'description': description,
+                                    'uploader': uploader,
+                                    'tags': tags
+                                }
                         except Exception as e:
                             logger.error(f"Не удалось скачать одиночное фото {img_url}: {e}")
+                        if os.path.exists(out_path):
+                            os.remove(out_path)
 
                 return {'success': False, 'error': 'Файл не был найден на диске после скачивания.'}
 
