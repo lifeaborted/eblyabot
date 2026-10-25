@@ -24,8 +24,14 @@ class InstagramDownloader(BaseDownloader):
             'outtmpl': f'{self.download_dir}/ig_%(id)s.%(ext)s',
             'quiet': False,
             'merge_output_format': 'mp4',
-            # Позволяет yt-dlp не падать на фото-постах и фото-слайдах в каруселях Instagram
             'ignore_no_formats_error': True,
+            'format': (
+                'bestvideo[filesize<42M]+bestaudio[filesize<6M]/'
+                'bestvideo[vbr<=3500]+bestaudio/'
+                'best[filesize<48M]/'
+                'bestvideo[height<=720]+bestaudio/'
+                'best'
+            ),
             'http_headers': {
                 'User-Agent': USER_AGENT,
                 'Accept-Language': 'en-US,en;q=0.9',

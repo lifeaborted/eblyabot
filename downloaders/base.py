@@ -8,6 +8,7 @@ import logging
 import uuid
 import yt_dlp
 import requests
+import shutil
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Callable, Optional
 
@@ -28,7 +29,7 @@ class BaseDownloader(ABC):
             return env_proxy
         try:
             with socket.create_connection(('127.0.0.1', 1080), timeout=0.3):
-                return 'socks5://127.0.0.1:1080'
+                return 'socks5h://127.0.0.1:1080'
         except OSError:
             return None
 
@@ -124,8 +125,25 @@ class BaseDownloader(ABC):
         else:
             opts.pop('proxy', None)
 
+        # Если используется cookiefile (особенно read-only /etc/secrets/cookies.txt),
+        # копируем его во временный файл, чтобы yt-dlp не падал с Errno 30 при закрытии
+        temp_cookie_path = None
+        orig_cookie = opts.get('cookiefile')
+        if orig_cookie and os.path.exists(orig_cookie) and os.path.getsize(orig_cookie) > 0:
+            temp_cookie_path = os.path.join(self.download_dir, f"cookies_{run_id}.txt")
+            try:
+                import shutil
+                shutil.copyfile(orig_cookie, temp_cookie_path)
+                opts['cookiefile'] = temp_cookie_path
+            except Exception as e:
+                logger.warning(f"Не удалось скопировать cookies: {e}")
+                opts.pop('cookiefile', None)
+
         opts['logger'] = logging.getLogger('yt-dlp')
         opts['max_filesize'] = MAX_FILE_SIZE
+        # Ограничиваем ffmpeg внутри yt-dlp одним потоком для экономии ОЗУ на Render (512 МБ)
+        opts['postprocessor_args'] = {'ffmpeg': ['-threads', '1']}
+        opts['concurrent_fragment_downloads'] = 1
         last_update_time = [0.0]
 
         def ytdl_hook(d):
@@ -145,12 +163,19 @@ class BaseDownloader(ABC):
                 asyncio.run_coroutine_threadsafe(progress_callback(percent, speed, eta), loop)
 
         opts['progress_hooks'] = [ytdl_hook]
-        result = await asyncio.to_thread(self._sync_download, url, opts, run_id)
-        if not result.get('success'):
-            for entry in os.scandir(self.download_dir):
-                if run_id in entry.name and entry.is_file():
-                    os.remove(entry.path)
-        return result
+        try:
+            result = await asyncio.to_thread(self._sync_download, url, opts, run_id)
+            if not result.get('success'):
+                for entry in os.scandir(self.download_dir):
+                    if run_id in entry.name and entry.is_file():
+                        os.remove(entry.path)
+            return result
+        finally:
+            if temp_cookie_path and os.path.exists(temp_cookie_path):
+                try:
+                    os.remove(temp_cookie_path)
+                except OSError:
+                    pass
 
     def _sync_download(self, url: str, opts: dict, run_id: str) -> Dict[str, Any]:
         try:
