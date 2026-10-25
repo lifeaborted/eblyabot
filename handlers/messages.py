@@ -5,7 +5,7 @@ import asyncio
 import logging
 from aiogram import Router, F, Bot
 from aiogram.types import Message, FSInputFile, InputMediaPhoto
-from downloaders.factory import DownloaderFactory
+from downloaders.factory import DownloaderFactory, download_media
 from utils.cleanup import temp_files_cleanup
 from config import DOWNLOAD_DIR
 import database
@@ -67,7 +67,7 @@ async def process_url(message: Message, bot: Bot, user_id: int, url: str, status
     resolved_url = await resolve_url(url)
 
     existing = await database.get_video_by_url(resolved_url)
-    if existing:
+    if existing and existing.get('file_id'):
         logger.info(f"[USER: {user_id}] Файл найден в БД. Выгружаем кэш...")
         await send_from_cache(message, bot, resolved_url, existing, status_msg)
         return
@@ -92,7 +92,7 @@ async def process_url(message: Message, bot: Bot, user_id: int, url: str, status
             pass
 
     logger.info(f"[USER: {user_id}] Старт скачивания через {type(downloader).__name__}...")
-    result = await downloader.download(resolved_url, progress_callback=progress_cb)
+    result = await download_media(downloader, resolved_url, progress_callback=progress_cb)
 
     if not result.get('success'):
         error_text = result.get('error', 'неизвестная ошибка')

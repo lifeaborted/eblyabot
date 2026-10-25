@@ -1,14 +1,29 @@
+import asyncio
 import os
 import logging
+import time
 from aiohttp import web
 from aiogram import Bot
 from aiogram.types import FSInputFile
 from config import BOT_TOKEN, PORT, DOWNLOAD_DIR
-from downloaders.factory import DownloaderFactory
+from downloaders.factory import DownloaderFactory, download_media
 from utils.url_resolver import resolve_url
 import database
 
 logger = logging.getLogger(__name__)
+WEB_DOWNLOAD_DIR = os.path.join(DOWNLOAD_DIR, 'web')
+WEB_FILE_TTL = 60 * 60
+
+
+def cleanup_old_web_files():
+    os.makedirs(WEB_DOWNLOAD_DIR, exist_ok=True)
+    cutoff = time.time() - WEB_FILE_TTL
+    for entry in os.scandir(WEB_DOWNLOAD_DIR):
+        try:
+            if entry.is_file() and entry.stat().st_mtime < cutoff:
+                os.remove(entry.path)
+        except FileNotFoundError:
+            pass
 
 
 async def serve_webapp(request):
@@ -16,12 +31,17 @@ async def serve_webapp(request):
 
 
 async def serve_video(request):
-    file_path = os.path.join(DOWNLOAD_DIR, request.match_info['filename'])
-    if not os.path.exists(file_path): return web.Response(status=404)
+    filename = os.path.basename(request.match_info['filename'])
+    file_path = os.path.join(WEB_DOWNLOAD_DIR, filename)
+    if not os.path.isfile(file_path):
+        file_path = os.path.join(DOWNLOAD_DIR, filename)
+    if not os.path.isfile(file_path): return web.Response(status=404)
     return web.FileResponse(file_path)
 
 
 async def api_download(request):
+    # shortcut: idle files expire on the next download; add a timer if idle disk use matters.
+    await asyncio.to_thread(cleanup_old_web_files)
     data = await request.json()
     url = await resolve_url(data.get('url', ''))
 
@@ -34,10 +54,10 @@ async def api_download(request):
             'media_type': existing.get('media_type')
         })
 
-    downloader = DownloaderFactory.get(url, DOWNLOAD_DIR)
+    downloader = DownloaderFactory.get(url, WEB_DOWNLOAD_DIR)
     if not downloader: return web.json_response({'success': False, 'error': 'Unsupported'})
 
-    result = await downloader.download(url)
+    result = await download_media(downloader, url)
     if not result['success']: return web.json_response({'success': False, 'error': result['error']})
 
     media_type = result.get('media_type', 'video')
@@ -66,9 +86,14 @@ async def api_send(request):
         sent = None
         if data.get('file_id'):
             sent = await bot.send_video(chat_id=chat_id, video=data['file_id'], caption=f"🎵 {data.get('title')}")
-        elif data.get('video_url') and os.path.exists(data['video_url']):
-            sent = await bot.send_video(chat_id=chat_id, video=FSInputFile(data['video_url']),
-                                        caption=f"🎵 {data.get('title')}")
+        elif isinstance(data.get('video_url'), str) and data['video_url'].startswith('/videos/'):
+            filename = os.path.basename(data['video_url'])
+            file_path = os.path.join(WEB_DOWNLOAD_DIR, filename)
+            if not os.path.isfile(file_path):
+                file_path = os.path.join(DOWNLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                sent = await bot.send_video(chat_id=chat_id, video=FSInputFile(file_path),
+                                            caption=f"🎵 {data.get('title')}")
 
         if sent and sent.video:
             await database.update_video_file_id(data['url'], sent.video.file_id)
